@@ -376,7 +376,7 @@
       currentRotation: 0,
       todayRecords: [],
       pendingDeleteIndex: -1,
-      activeModel: localStorage.getItem("liho_active_model") || "gemini-3.6-flash"
+      activeModel: localStorage.getItem("liho_active_model") || "gemini-2.5-flash"
     };
 
     // DOM 元素快取
@@ -477,8 +477,8 @@
       DOM.targetMonthBadge.textContent = targetMonth;
     }
 
-    // 極速將高解析度手機照片壓縮為 1000px 以內 (減少 90% 網路傳輸延遲)
-    async function compressImage(base64Src, maxDim = 900, quality = 0.7) {
+    // 高清最佳化壓縮：保持 1500px 解析度，文字清晰不失真，體積控制在 200KB 內
+    async function compressImage(base64Src, maxDim = 1500, quality = 0.85) {
       return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -505,108 +505,46 @@
       });
     }
 
-    // 取得當前 API Key 真正開通且支援 generateContent 的模型與 API 版本
-    async function resolveActiveGeminiEndpoint(apiKey) {
-      // 若已確認過可用端點，直接快速使用快取
-      if (STATE.cachedEndpoint) {
-        return STATE.cachedEndpoint;
-      }
-
-      const apiVersions = ["v1beta", "v1"];
-      let diagnosticError = "";
-
-      for (const ver of apiVersions) {
-        try {
-          const listUrl = `https://generativelanguage.googleapis.com/${ver}/models?key=${encodeURIComponent(apiKey)}`;
-          const res = await fetch(listUrl, {
-            headers: { "x-goog-api-key": apiKey }
-          });
-          
-          if (res.ok) {
-            const data = await res.json();
-            const validModels = (data.models || [])
-              .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes("generateContent"))
-              .map(m => m.name.replace(/^models\//, ""));
-
-            if (validModels.length > 0) {
-              const preferredList = [
-                "gemini-3.6-flash",
-                "gemini-3-flash",
-                "gemini-3.0-flash",
-                "gemini-2.5-flash",
-                "gemini-flash-latest"
-              ];
-              
-              let matched = "";
-              for (const pref of preferredList) {
-                if (validModels.includes(pref)) {
-                  matched = pref;
-                  break;
-                }
-              }
-              if (!matched) {
-                matched = validModels.find(m => m.includes("flash")) || validModels[0];
-              }
-
-              STATE.cachedEndpoint = { ver, model: matched };
-              return STATE.cachedEndpoint;
-            }
-          } else {
-            const err = await res.json().catch(() => ({}));
-            diagnosticError = `[${ver}] ${err?.error?.message || `HTTP ${res.status}`}`;
-          }
-        } catch (e) {
-          diagnosticError = e.message || String(e);
-        }
-      }
-
-      return { 
-        ver: "v1beta", 
-        model: "gemini-3.6-flash", 
-        lastError: diagnosticError 
-      };
-    }
-
-    // 呼叫 Gemini AI 進行單據辨識
+    // 極速單據辨識：精確鎖定結算總額，絕不發呆輪詢
     async function performGeminiOcr(rawBase64) {
       DOM.diagnosticBanner.classList.add("hidden");
       DOM.scannerOverlay.classList.remove("hidden");
-      DOM.scannerSubText.textContent = "正在連結 AI 引擎解析中...";
+      DOM.scannerSubText.textContent = "AI 高清極速解析中...";
 
-      const promptText = `你是專業餐飲「里好餐桌」店長助理，請辨識此進貨單，僅輸出純 JSON，格式如下：
+      const promptText = `你是專業餐飲「里好餐桌」的進貨單審核助理。請仔細辨識這張進貨單/出貨單，嚴格輸出純 JSON：
 {
-  "vendor": "廠商名稱 (從 恬芯, 德麥, 美金, 憶霖, 開元, 富盈, 第一饗, 鴻品, 樹森, 有心, Agogo, 好市多, 檸檬先生 等優先匹配，若無則依單據實際公司名)",
+  "vendor": "廠商簡稱 (優先比對：恬芯, 德麥, 美金, 憶霖, 開元, 富盈, 第一饗, 鴻品, 樹森, 有心, Agogo, 好市多, 檸檬先生，無則填單據印製之公司名)",
   "totalAmount": 2520,
-  "date": "YYYY-MM-DD (若單據為民國年 115-09-11 請換算為西元 2026-09-11)",
-  "invoiceNo": "單號或發票號 (若無發票或收據請留空字串)",
+  "date": "YYYY-MM-DD (若單據寫民國年如115-09-11，務必換算為西元年2026-09-11)",
+  "invoiceNo": "單據編號或發票號碼 (例如 SA1150911090 或 FQ09719146，若完全沒有請留空字串)",
   "paymentMethod": "已匯款 或 下貨收現 或 廠商月結"
-}`;
+}
+
+【特別注意事項 - 總金額 totalAmount】：
+請務必精準辨識單據右下方或最後結算的【總額】、【合計】或【實付總計】數字（例如：若單據有淨額2400、稅額120、總額2520，請務必抓取最終結算的【總額 2520】！輸出純整數，勿帶文字或符號）。`;
 
       try {
         const apiKey = (STATE.apiKey || "").trim();
         if (!apiKey) {
-          showToast("請在設定頁或網址中設定 API Key", "warning");
+          showToast("請先設定 API Key", "warning");
           DOM.scannerOverlay.classList.add("hidden");
           return;
         }
 
-        // 1. 壓縮相片 (縮小 90% 傳輸量)
-        const fastBase64 = await compressImage(rawBase64, 900, 0.7);
+        // 1. 高清無損壓縮（1500px，保留所有小字與表格數字）
+        const fastBase64 = await compressImage(rawBase64, 1500, 0.85);
         const cleanBase64 = fastBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
 
-        // 2. 解析當前專案實際可用的模型端點
-        const targetEndpoint = await resolveActiveGeminiEndpoint(apiKey);
-        
-        const attemptQueue = [
-          { ver: targetEndpoint.ver, model: targetEndpoint.model },
-          { ver: "v1beta", model: "gemini-3.6-flash" },
-          { ver: "v1", model: "gemini-3.6-flash" },
-          { ver: "v1beta", model: "gemini-3-flash" },
-          { ver: "v1beta", model: "gemini-flash-latest" }
+        // 2. 候選模型清單（首選記憶體中已驗證的模型，秒速直連）
+        const candidateModels = [
+          STATE.activeModel,
+          "gemini-2.5-flash",
+          "gemini-3-flash-preview",
+          "gemini-2.5-flash-lite",
+          "gemini-flash-latest"
         ];
-
-        let parsed = null;
-        let lastErrorText = targetEndpoint.lastError || "";
+        // 去除重複
+        const modelsToTry = [...new Set(candidateModels.filter(Boolean))];
 
         const payload = {
           contents: [{
@@ -618,74 +556,62 @@
           }],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 300,
+            maxOutputTokens: 250,
             responseMimeType: "application/json"
           }
         };
 
-        const tried = new Set();
-        for (const item of attemptQueue) {
-          const keyId = `${item.ver}/${item.model}`;
-          if (tried.has(keyId)) continue;
-          tried.add(keyId);
+        let parsed = null;
+        let lastErrorText = "";
 
-          // 壅塞重試機制：若遇 429/503 自動退避重試最多 2 次
-          let retryCount = 0;
-          const maxRetries = 2;
+        // 3. 單次快速發送，失敗立即切換下一隻，絕不延遲發呆
+        for (const model of modelsToTry) {
+          try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+            const res = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": apiKey
+              },
+              body: JSON.stringify(payload)
+            });
 
-          while (retryCount <= maxRetries) {
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              lastErrorText = `[${model}] ${err?.error?.message || `HTTP ${res.status}`}`;
+              continue; // 立即嘗試下一個可用模型
+            }
+
+            const data = await res.json();
+            const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            
             try {
-              const url = `https://generativelanguage.googleapis.com/${item.ver}/models/${item.model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-              const res = await fetch(url, {
-                method: "POST",
-                headers: { 
-                  "Content-Type": "application/json",
-                  "x-goog-api-key": apiKey
-                },
-                body: JSON.stringify(payload)
-              });
+              parsed = JSON.parse(rawText);
+            } catch (pErr) {
+              const match = rawText.match(/\{[\s\S]*\}/);
+              if (match) parsed = JSON.parse(match[0]);
+            }
 
-              if (!res.ok) {
-                const errJson = await res.json().catch(() => ({}));
-                const errMsg = errJson?.error?.message || `HTTP ${res.status}`;
-                lastErrorText = `[${item.ver}/${item.model}] ${errMsg}`;
-
-                // 若遇到 Google 壅塞 (429 Too Many Requests 或 503 Service Unavailable)，自動避讓重試
-                if ((res.status === 429 || res.status === 503 || errMsg.includes("high demand")) && retryCount < maxRetries) {
-                  retryCount++;
-                  DOM.scannerSubText.textContent = `Google 伺服器繁忙，正在自動重新分流 (第 ${retryCount} 次)...`;
-                  await new Promise(r => setTimeout(r, 1200 * retryCount)); // 等待 1.2 秒後重試
-                  continue;
-                }
-                break; // 換下一個備援模型
-              }
-
-              const data = await res.json();
-              const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-              
-              try {
-                parsed = JSON.parse(rawText);
-              } catch (pErr) {
-                const match = rawText.match(/\{[\s\S]*\}/);
-                if (match) parsed = JSON.parse(match[0]);
-              }
-
-              if (parsed) {
-                STATE.cachedEndpoint = item; // 記住成功端點
-                break;
-              }
-            } catch (fetchErr) {
-              lastErrorText = fetchErr.message || String(fetchErr);
+            if (parsed) {
+              // 記錄這次成功秒開的模型，往後每次直接用這隻，0 延遲
+              STATE.activeModel = model;
+              localStorage.setItem("liho_active_model", model);
               break;
             }
+          } catch (e) {
+            lastErrorText = e.message || String(e);
           }
-
-          if (parsed) break;
         }
 
+        // 4. 填入表單
         if (parsed) {
+          // 金額防呆：轉為純數字整數
           if (parsed.totalAmount !== undefined && parsed.totalAmount !== null && parsed.totalAmount !== "") {
-            DOM.inputTotalAmount.value = parsed.totalAmount;
+            const num = parseInt(String(parsed.totalAmount).replace(/[^0-9]/g, ""), 10);
+            if (!isNaN(num) && num > 0) {
+              DOM.inputTotalAmount.value = num;
+            }
           }
           if (parsed.vendor) DOM.inputVendor.value = parsed.vendor;
           if (parsed.invoiceNo) DOM.inputInvoiceNo.value = parsed.invoiceNo;
@@ -708,11 +634,10 @@
 
           showToast("✨ AI 已秒速辨識單據！", "success");
         } else {
-          // 顯示清晰診斷資訊
           DOM.diagnosticBanner.classList.remove("hidden");
-          DOM.diagnosticTitle.textContent = "AI 辨識連線未完成";
-          DOM.diagnosticMsg.textContent = lastErrorText || "未收到辨識數據，請確認網路或金鑰權限。";
-          showToast("辨識未完成，請見畫面下方提示", "warning");
+          DOM.diagnosticTitle.textContent = "AI 辨識未完成";
+          DOM.diagnosticMsg.textContent = lastErrorText || "未收到辨識數據，請確認網路連線。";
+          showToast("辨識未完成，請見畫面提示", "warning");
         }
 
       } catch (err) {
