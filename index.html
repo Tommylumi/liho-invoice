@@ -491,16 +491,16 @@
       });
     }
 
-    // 呼叫 Gemini AI 進行單據辨識 (直接採用 gemini-2.5-flash 極速模型)
+    // 呼叫 Gemini AI 進行單據辨識 (以官方推薦之 gemini-3-flash-preview 與 2.5 階層備援)
     async function performGeminiOcr(rawBase64) {
       DOM.scannerOverlay.classList.remove("hidden");
 
-      const systemPrompt = `你是一位專業的餐飲業「里好餐桌」店長助理，請仔細辨識這張進貨單據，僅回傳乾淨的 JSON：
+      const promptText = `你是一位專業的餐飲業「里好餐桌」店長助理，請仔細辨識這張進貨單／出貨單據，請提取以下資訊並嚴格僅輸出 JSON 格式（不要包含 markdown 標籤或額外文字）：
 {
-  "vendor": "廠商名稱 (從 德麥, 恬芯, 美金, 憶霖, 開元, 富盈, 第一饗, 鴻品, 樹森, 有心, Agogo, 好市多, 檸檬先生 等優先匹配)",
+  "vendor": "廠商名稱 (從 恬芯, 德麥, 美金, 憶霖, 開元, 富盈, 第一饗, 鴻品, 樹森, 有心, Agogo, 好市多, 檸檬先生 等優先匹配，若不在清單中請輸出單據上印製的真實公司名稱)",
   "totalAmount": 2520,
-  "date": "YYYY-MM-DD",
-  "invoiceNo": "單據編號或發票號碼 (若無則填空字串)",
+  "date": "YYYY-MM-DD (若單據為民國年如 115-09-11，請換算為西元 2026-09-11)",
+  "invoiceNo": "單號或發票號碼 (如 SA1150911090 或 FQ09719146，若無則留空字串)",
   "paymentMethod": "下貨收現 或 廠商月結 或 已匯款"
 }`;
 
@@ -512,25 +512,25 @@
           return;
         }
 
-        // 1. 本地壓縮
-        const fastBase64 = await compressImage(rawBase64, 1000, 0.75);
-        const cleanBase64 = fastBase64.split(",")[1] || fastBase64;
+        // 1. 本地壓縮圖片至最佳辨識解析度
+        const fastBase64 = await compressImage(rawBase64, 1024, 0.8);
+        const cleanBase64 = fastBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
 
-        // 2. 備援模型清單 (以現行最高速模型優先)
-        const models = ["gemini-2.5-flash", "gemini-2.0-flash"];
+        // 2. 備援模型清單 (最新官方模型 gemini-3-flash-preview 優先)
+        const models = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
         let parsed = null;
         let lastErrMsg = "";
 
         const payload = {
           contents: [{
+            role: "user",
             parts: [
-              { text: systemPrompt + "\n請辨識出貨單，嚴格輸出 JSON 格式。" },
+              { text: promptText },
               { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
             ]
           }],
           generationConfig: {
-            temperature: 0.1,
-            responseMimeType: "application/json"
+            temperature: 0.1
           }
         };
 
@@ -555,7 +555,7 @@
 
             const data = await res.json();
             const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-            const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+            const jsonMatch = rawText.match(/\{[\s\S]*?\}/);
             if (jsonMatch) {
               parsed = JSON.parse(jsonMatch[0]);
               break; // 成功獲取即跳出
@@ -566,12 +566,14 @@
         }
 
         if (parsed) {
-          if (parsed.totalAmount) DOM.inputTotalAmount.value = parsed.totalAmount;
+          if (parsed.totalAmount !== undefined && parsed.totalAmount !== null && parsed.totalAmount !== "") {
+            DOM.inputTotalAmount.value = parsed.totalAmount;
+          }
           if (parsed.vendor) DOM.inputVendor.value = parsed.vendor;
           if (parsed.invoiceNo) DOM.inputInvoiceNo.value = parsed.invoiceNo;
           
           if (parsed.date) {
-            let d = parsed.date.replace(/\./g, "-");
+            let d = String(parsed.date).replace(/\./g, "-").replace(/\//g, "-").trim();
             const dParts = d.split("-");
             // 民國年換算 (如 115 -> 2026)
             if (dParts[0] && parseInt(dParts[0], 10) < 1900) {
@@ -589,11 +591,11 @@
 
           showToast("✨ AI 已秒速辨識單據！", "success");
         } else {
-          showToast("辨識未完全成功，請核對金額", "warning");
+          showToast("辨識未成功：" + (lastErrMsg || "未能解析單據內容"), "warning");
         }
 
       } catch (err) {
-        showToast("辨識異常，請手動確認資料", "warning");
+        showToast("系統異常：" + (err.message || String(err)), "error");
       } finally {
         DOM.scannerOverlay.classList.add("hidden");
       }
