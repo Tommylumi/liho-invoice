@@ -657,8 +657,10 @@
           return;
         }
 
-        const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        // 針對 Google 最新 AQ. 與 AIza 金鑰規格，優先調用官方穩定模型並掛載 x-goog-api-key 標頭
+        const models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-1.5-pro"];
         let parsed = null;
+        let lastErrorMsg = "";
 
         const payload = {
           systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -673,14 +675,22 @@
 
         for (const model of models) {
           try {
-            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+            // Google AQ. 格式金鑰必須同時支援 header (x-goog-api-key) 與 URL 參數
+            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
             const res = await fetch(endpoint, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                "Content-Type": "application/json",
+                "x-goog-api-key": apiKey
+              },
               body: JSON.stringify(payload)
             });
 
-            if (!res.ok) continue;
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              lastErrorMsg = errData?.error?.message || `HTTP ${res.status}`;
+              continue;
+            }
 
             const data = await res.json();
             const rawJson = data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -688,7 +698,9 @@
               parsed = JSON.parse(rawJson);
               break;
             }
-          } catch (modelErr) {}
+          } catch (modelErr) {
+            lastErrorMsg = modelErr.message || String(modelErr);
+          }
         }
 
         if (parsed) {
@@ -710,10 +722,10 @@
           }
           showToast("✨ AI 已成功辨識單據！", "success");
         } else {
-          showToast("請手動核對金額與廠商", "warning");
+          showToast("辨識未成功：" + (lastErrorMsg || "請手動核對金額"), "warning");
         }
       } catch (err) {
-        showToast("請手動核對金額與廠商", "warning");
+        showToast("辨識異常，請手動輸入", "warning");
       } finally {
         DOM.scannerOverlay?.classList.add("hidden");
       }
