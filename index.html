@@ -638,7 +638,7 @@
     async function performGeminiOcr(base64Data) {
       DOM.scannerOverlay?.classList.remove("hidden");
 
-      const systemPrompt = `你是一位專業的餐飲業「里好餐桌」店長助理，請仔細辨識這張進貨單據，直接回傳乾淨的 JSON：
+      const systemPrompt = `你是一位專業的餐飲業「里好餐桌」店長助理，請仔細辨識這張進貨單據，回傳乾淨的 JSON：
 {
   "vendor": "廠商名稱 (從 德麥, 憶霖, 富盈, 第一饗, 鴻品, 凱燁, 樹森, 有心, Agogo, 美金, 三佳, 恬芯, 鼎鎂, 源品, 潞運, 麻辣, 好市多, 開元, 檸檬先生, 親民 等優先匹配)",
   "totalAmount": 2520,
@@ -657,25 +657,47 @@
           return;
         }
 
-        // 升級為 Google 最新主流模型（全面替換已遭 Google 停用的 1.5 系列）
-        const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-preview"];
+        // 第一步：自動連線 Google API 查詢此金鑰目前可用的所有模型清單（不再手動猜測模型名稱）
+        let availableModels = [];
+        try {
+          const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`, {
+            headers: { "x-goog-api-key": apiKey }
+          });
+          if (listRes.ok) {
+            const listData = await listRes.json();
+            if (listData.models && Array.isArray(listData.models)) {
+              availableModels = listData.models
+                .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
+                .map(m => m.name.replace(/^models\//, ""))
+                .sort((a, b) => {
+                  const aFlash = (a.includes("flash") || a.includes("2.5") || a.includes("2.0")) ? 1 : 0;
+                  const bFlash = (b.includes("flash") || b.includes("2.5") || b.includes("2.0")) ? 1 : 0;
+                  return bFlash - aFlash;
+                });
+            }
+          }
+        } catch (listErr) {}
+
+        // 若動態查詢失敗，使用高相容度官方備選清單
+        if (availableModels.length === 0) {
+          availableModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest", "gemini-pro-latest"];
+        }
+
         let parsed = null;
         let lastErrorMsg = "";
 
+        const promptText = systemPrompt + "\n\n請務必辨識照片中的出貨單或進貨發票，僅回傳符合規格的 JSON。";
         const payload = {
-          systemInstruction: { parts: [{ text: systemPrompt }] },
           contents: [{
             parts: [
-              { text: "請辨識這張進貨出貨單據並回傳乾淨的 JSON 格式。" },
+              { text: promptText },
               { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
             ]
-          }],
-          generationConfig: { responseMimeType: "application/json" }
+          }]
         };
 
-        for (const model of models) {
+        for (const model of availableModels) {
           try {
-            // 同時附帶 URL 參數與 x-goog-api-key 標頭，完整支援 AQ. 新版金鑰
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
             const res = await fetch(endpoint, {
               method: "POST",
@@ -693,9 +715,12 @@
             }
 
             const data = await res.json();
-            const rawJson = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (rawJson) {
-              parsed = JSON.parse(rawJson);
+            const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            
+            // 提取 JSON 字串（支援 Markdown 代碼塊包覆）
+            const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              parsed = JSON.parse(jsonMatch[0]);
               break;
             }
           } catch (modelErr) {
