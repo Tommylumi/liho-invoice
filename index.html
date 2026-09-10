@@ -376,7 +376,7 @@
       currentRotation: 0,
       todayRecords: [],
       pendingDeleteIndex: -1,
-      activeModel: localStorage.getItem("liho_active_model") || "gemini-2.0-flash"
+      activeModel: localStorage.getItem("liho_active_model") || "gemini-3.6-flash"
     };
 
     // DOM 元素快取
@@ -518,7 +518,9 @@
       for (const ver of apiVersions) {
         try {
           const listUrl = `https://generativelanguage.googleapis.com/${ver}/models?key=${encodeURIComponent(apiKey)}`;
-          const res = await fetch(listUrl);
+          const res = await fetch(listUrl, {
+            headers: { "x-goog-api-key": apiKey }
+          });
           
           if (res.ok) {
             const data = await res.json();
@@ -527,13 +529,12 @@
               .map(m => m.name.replace(/^models\//, ""));
 
             if (validModels.length > 0) {
-              // 優先挑選速度與視覺表現最佳的現行 Flash 模型
               const preferredList = [
+                "gemini-3.6-flash",
+                "gemini-3-flash",
+                "gemini-3.0-flash",
                 "gemini-2.5-flash",
-                "gemini-2.0-flash",
-                "gemini-flash-latest",
-                "gemini-2.0-flash-lite",
-                "gemini-1.5-flash"
+                "gemini-flash-latest"
               ];
               
               let matched = "";
@@ -559,10 +560,9 @@
         }
       }
 
-      // 若 ListModels 受限，使用當前最穩定的端點做備援
       return { 
         ver: "v1beta", 
-        model: "gemini-2.5-flash", 
+        model: "gemini-3.6-flash", 
         lastError: diagnosticError 
       };
     }
@@ -597,12 +597,11 @@
         // 2. 解析當前專案實際可用的模型端點
         const targetEndpoint = await resolveActiveGeminiEndpoint(apiKey);
         
-        // 候選清單：由 Google 實際提供之模型首選，輔以備援
         const attemptQueue = [
           { ver: targetEndpoint.ver, model: targetEndpoint.model },
-          { ver: "v1beta", model: "gemini-2.5-flash" },
-          { ver: "v1", model: "gemini-2.5-flash" },
-          { ver: "v1beta", model: "gemini-2.0-flash" }
+          { ver: "v1beta", model: "gemini-3.6-flash" },
+          { ver: "v1", model: "gemini-3.6-flash" },
+          { ver: "v1beta", model: "gemini-flash-latest" }
         ];
 
         let parsed = null;
@@ -633,7 +632,10 @@
             const url = `https://generativelanguage.googleapis.com/${item.ver}/models/${item.model}:generateContent?key=${encodeURIComponent(apiKey)}`;
             const res = await fetch(url, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { 
+                "Content-Type": "application/json",
+                "x-goog-api-key": apiKey
+              },
               body: JSON.stringify(payload)
             });
 
