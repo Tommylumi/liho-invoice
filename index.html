@@ -1,0 +1,1361 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>里好餐桌 門市進貨系統</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            liho: {
+              red: '#9B443B',       /* 里好經典磚紅 (主色) */
+              redhover: '#823830',
+              redlight: '#F8ECEB',
+              green: '#4E7055',     /* 鮮蔬草本綠 (成功/辨識強調) */
+              greenlight: '#EDF3EE',
+              sand: '#E8DFD3',      /* 溫潤燕麥砂色 */
+              bg: '#FAF7F2',        /* 餐桌底色 */
+              dark: '#2D2825',      /* 深焙炭黑文字 */
+              muted: '#7A726D'      /* 輔助灰褐文字 */
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['SF Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace']
+          },
+          boxShadow: {
+            'ticket': '0 8px 30px rgba(45, 40, 37, 0.08)',
+            'nav': '0 -4px 20px rgba(0, 0, 0, 0.06)'
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    /* 平滑滾動與觸控體驗 */
+    body {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      background-color: #FAF7F2;
+    }
+    /* 仿相機掃描線動畫 */
+    @keyframes scanLine {
+      0% { top: 5%; opacity: 0.8; }
+      50% { top: 90%; opacity: 1; }
+      100% { top: 5%; opacity: 0.8; }
+    }
+    .scanner-active::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #4E7055, #9B443B, transparent);
+      box-shadow: 0 0 12px #4E7055;
+      animation: scanLine 2s infinite ease-in-out;
+      z-index: 20;
+    }
+    /* 鋸齒票據造型效果 */
+    .receipt-edge {
+      background-image: radial-gradient(circle at 10px -5px, transparent 12px, white 13px);
+      background-size: 20px 20px;
+    }
+  </style>
+</head>
+<body class="text-liho-dark font-sans flex flex-col min-h-screen select-none antialiased">
+
+  <!-- 頂部精準狀態列 (極致精簡) -->
+  <header class="bg-liho-red text-white sticky top-0 z-30 shadow-md">
+    <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-2.5">
+        <div class="w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-inner">
+          <span class="text-liho-red font-black text-base">里</span>
+        </div>
+        <div>
+          <h1 class="text-base font-black tracking-tight leading-none">里好餐桌 • 進貨系統</h1>
+          <div class="flex items-center space-x-1.5 mt-0.5">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="headerDateDisplay" class="text-[11px] text-white/80 font-medium">載入中...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右側快速資訊：連線狀態與當日統計膠囊 -->
+      <div class="flex items-center space-x-2">
+        <button id="btnQuickSync" class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-black/20 hover:bg-black/30 text-[11px] font-bold tracking-wide transition-colors">
+          <span id="syncDot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span id="syncText">雲端就緒</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 今日進度條（極簡進度線） -->
+    <div class="bg-black/15 px-4 py-1.5 flex items-center justify-between text-[11px] text-white/90">
+      <div class="flex items-center space-x-2">
+        <span>今日已記：<strong id="barCount" class="font-mono text-white text-xs">0 / 20</strong> 張</span>
+        <span class="text-white/40">|</span>
+        <span>累計：<strong id="barTotal" class="font-mono text-white text-xs">NT$ 0</strong></span>
+      </div>
+      <div class="w-24 bg-white/25 rounded-full h-1.5 overflow-hidden">
+        <div id="barFill" class="bg-emerald-400 h-full rounded-full transition-all duration-300" style="width: 0%"></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主視窗容器 (手機最佳寬度 max-w-md，保留底部導覽列空間 pb-24) -->
+  <main class="flex-1 max-w-md w-full mx-auto p-4 pb-28">
+
+    <!-- ==================== TAB 1: 拍照與記帳主介面 ==================== -->
+    <section id="tabViewScan" class="space-y-4">
+
+      <!-- 階段 1：拍照入口 (當尚未拍照時呈現超大按鈕) -->
+      <div id="sectionCaptureEntry" class="bg-white rounded-3xl p-6 border-2 border-dashed border-liho-sand text-center shadow-sm relative overflow-hidden">
+        <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
+        <input type="file" id="galleryInput" accept="image/*" class="hidden">
+
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-liho-redlight flex items-center justify-center text-liho-red mb-3">
+          <svg class="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+        </div>
+
+        <h2 class="text-lg font-black text-liho-dark mb-1">收到進貨單，拍一張立即記帳</h2>
+        <p class="text-xs text-liho-muted mb-5">AI 自動抓取廠商、金額、日期，自動連動 Google 試算表</p>
+
+        <!-- 雙大觸控按鈕：相機直拍 / 相簿選取 -->
+        <div class="grid grid-cols-1 gap-2.5">
+          <button type="button" id="btnLaunchCamera" class="w-full py-4 rounded-2xl bg-liho-red hover:bg-liho-redhover text-white font-black text-base flex items-center justify-center space-x-2 shadow-lg shadow-liho-red/20 active:scale-[0.98] transition-all">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <span>開啟手機相機拍照</span>
+          </button>
+          
+          <button type="button" id="btnLaunchGallery" class="w-full py-2.5 rounded-xl bg-liho-sand/40 hover:bg-liho-sand text-liho-dark font-bold text-xs flex items-center justify-center space-x-1.5 transition-colors">
+            <svg class="w-4 h-4 text-liho-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            <span>從相簿選擇已拍照片</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 階段 2：已拍照預覽 & AI 掃描中動畫 (動態顯示) -->
+      <div id="sectionPreviewBox" class="hidden bg-white rounded-2xl p-3 shadow-sm border border-liho-sand relative overflow-hidden">
+        <div class="relative rounded-xl overflow-hidden bg-stone-900 aspect-[4/3] flex items-center justify-center" id="scannerWrapper">
+          <img id="imgPreview" class="max-w-full max-h-full object-contain" alt="進貨單預覽">
+          
+          <!-- 掃描中遮罩 -->
+          <div id="scannerOverlay" class="hidden absolute inset-0 bg-stone-900/60 backdrop-blur-[2px] flex flex-col items-center justify-center text-white z-30 p-4 text-center">
+            <div class="w-12 h-12 border-3 border-emerald-400 border-t-transparent rounded-full animate-spin mb-3"></div>
+            <p class="font-black text-sm tracking-wide">Gemini 正在極速解析單據...</p>
+            <p class="text-[11px] text-white/70 mt-0.5">自動辨識廠商名稱、總金額與單號</p>
+          </div>
+        </div>
+
+        <!-- 圖片輔助操作工具列 (旋轉、重拍) -->
+        <div class="flex items-center justify-between mt-2 pt-2 border-t border-stone-100 text-xs font-semibold">
+          <button type="button" id="btnRotatePhoto" class="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 flex items-center space-x-1">
+            <span>🔄 旋轉 90°</span>
+          </button>
+          <button type="button" id="btnRetakePhoto" class="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center space-x-1">
+            <span>🗑️ 重新拍攝</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 階段 3：AI 辨識結果核對卡片 (以實體進貨單票據為隱喻) -->
+      <div id="sectionFormTicket" class="bg-white rounded-3xl shadow-ticket border border-stone-200 overflow-hidden">
+        
+        <!-- 票據頂部標題列 -->
+        <div class="bg-gradient-to-r from-stone-800 to-stone-900 text-white px-5 py-3 flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="text-xs font-black tracking-wider uppercase">進貨單核對卡</span>
+          </div>
+          <span id="targetMonthChip" class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-white/20 text-white">202609</span>
+        </div>
+
+        <div class="p-5 space-y-4">
+          
+          <!-- 【核心 1：總金額 (超大字體顯示，第一時間核對)】 -->
+          <div class="bg-liho-sand/20 rounded-2xl p-3.5 border border-liho-sand/60 text-center">
+            <label class="block text-[11px] font-bold text-liho-muted uppercase tracking-wider mb-1">
+              💰 進貨總金額 (含稅)
+            </label>
+            <div class="relative flex items-center justify-center">
+              <span class="text-xl font-bold text-liho-red font-mono mr-1">NT$</span>
+              <input type="number" id="inputTotalAmount" class="w-48 text-center text-3xl font-black font-mono text-liho-red bg-transparent focus:outline-none border-b-2 border-liho-red/40 focus:border-liho-red py-0.5" placeholder="0">
+            </div>
+            <p class="text-[10px] text-liho-muted mt-1">※ 若辨識有微調，可直接點擊數字手動修正</p>
+          </div>
+
+          <!-- 【核心 2：廠商名稱 (支援常用廠商一鍵填入)】 -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-xs font-bold text-liho-dark">🏢 廠商名稱</label>
+              <span class="text-[10px] text-liho-muted">必填 • 點選快捷鍵或手動輸入</span>
+            </div>
+            <input type="text" id="inputVendor" class="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-liho-red focus:ring-1 focus:ring-liho-red text-sm font-bold text-liho-dark" placeholder="請點選下方廠商或手動輸入...">
+            
+            <!-- 門市 20 家常態合作廠商快捷標籤 (點選快速帶入) -->
+            <div class="mt-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[10px] font-bold text-liho-muted">常態合作廠商（共 20 家，點擊秒填）：</span>
+              </div>
+              <div class="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1" id="vendorTagContainer">
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">德麥</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">憶霖</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">富盈</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">第一饗</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">鴻品</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">凱燁</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">樹森</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">有心</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">Agogo</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">美金</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">三佳</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">恬芯</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">鼎鎂</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">源品</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">潞運</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">麻辣</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">好市多</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">開元</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">檸檬先生</button>
+                <button type="button" class="btn-vendor-tag px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-liho-redlight hover:text-liho-red text-stone-700 text-xs font-bold transition-colors">親民</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 【核心 3：付款方式 (3 顆大型觸控切換膠囊，極致好按)】 -->
+          <div>
+            <label class="block text-xs font-bold text-liho-dark mb-1.5">💳 付款方式</label>
+            <div class="grid grid-cols-3 gap-2" id="paymentButtonGroup">
+              <button type="button" data-val="下貨收現" class="btn-payment-pill py-2.5 px-2 rounded-xl text-xs font-black border-2 border-liho-red bg-liho-red text-white shadow-sm flex flex-col items-center justify-center transition-all">
+                <span>💵 下貨收現</span>
+              </button>
+              <button type="button" data-val="廠商月結" class="btn-payment-pill py-2.5 px-2 rounded-xl text-xs font-bold border-2 border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100 flex flex-col items-center justify-center transition-all">
+                <span>📅 廠商月結</span>
+              </button>
+              <button type="button" data-val="已匯款" class="btn-payment-pill py-2.5 px-2 rounded-xl text-xs font-bold border-2 border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100 flex flex-col items-center justify-center transition-all">
+                <span>🏦 已匯款</span>
+              </button>
+            </div>
+            <input type="hidden" id="inputPaymentMethod" value="下貨收現">
+          </div>
+
+          <!-- 【核心 4：進貨日期 & 經手人】 -->
+          <div class="space-y-3 pt-1">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-liho-dark mb-1">📅 進貨日期</label>
+                <input type="date" id="inputDate" class="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs font-semibold text-liho-dark focus:border-liho-red">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-liho-dark mb-1">👤 經手同仁</label>
+                <input type="text" id="inputStaff" class="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs font-bold text-liho-dark focus:border-liho-red bg-stone-50" placeholder="點擊下方快速選取">
+              </div>
+            </div>
+
+            <!-- 門市 5 位經手同仁快速點選按鈕 (含其他) -->
+            <div>
+              <div class="text-[10px] font-bold text-liho-muted mb-1">快速選取今日經手同仁：</div>
+              <div class="grid grid-cols-5 gap-1.5" id="staffButtonGroup">
+                <button type="button" data-staff="惠毓" class="btn-staff-pill py-2 px-1 rounded-xl text-xs font-black border border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100 text-center transition-all">惠毓</button>
+                <button type="button" data-staff="梓庭" class="btn-staff-pill py-2 px-1 rounded-xl text-xs font-black border border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100 text-center transition-all">梓庭</button>
+                <button type="button" data-staff="佩嘉" class="btn-staff-pill py-2 px-1 rounded-xl text-xs font-black border border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100 text-center transition-all">佩嘉</button>
+                <button type="button" data-staff="雨函" class="btn-staff-pill py-2 px-1 rounded-xl text-xs font-black border border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100 text-center transition-all">雨函</button>
+                <button type="button" data-staff="其他" class="btn-staff-pill py-2 px-1 rounded-xl text-xs font-black border border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100 text-center transition-all">其他</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 【進階次要欄位：預設折疊收納，不干擾視線】 -->
+          <div class="border-t border-stone-150 pt-2">
+            <button type="button" id="btnToggleDetails" class="w-full py-1 text-center text-xs font-bold text-liho-muted hover:text-liho-dark flex items-center justify-center space-x-1">
+              <span id="detailToggleText">＋ 展開次要資訊 (發票號碼、分類、明細)</span>
+              <svg id="detailToggleIcon" class="w-3.5 h-3.5 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+
+            <div id="boxDetails" class="hidden space-y-3 pt-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[11px] font-bold text-stone-500 mb-1">單據 / 發票號碼</label>
+                  <input type="text" id="inputInvoiceNo" class="w-full px-3 py-1.5 rounded-lg border border-stone-300 text-xs font-mono" placeholder="無單號可免填">
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-stone-500 mb-1">成本類別</label>
+                  <select id="selectCategory" class="w-full px-2.5 py-1.5 rounded-lg border border-stone-300 text-xs bg-white font-medium">
+                    <option value="食材-生鮮蔬果配菜">食材-生鮮蔬果配菜</option>
+                    <option value="食材-肉品海鮮蛋白質">食材-肉品海鮮蛋白質</option>
+                    <option value="食材-胚芽米麵食五穀">食材-胚芽米麵食五穀</option>
+                    <option value="醬料-沙拉醬與特調醬">醬料-沙拉醬與特調醬</option>
+                    <option value="茶飲-高山茶與飲品原物料">茶飲-高山茶與原物料</option>
+                    <option value="耗材-外帶餐盒包材">耗材-外帶餐盒包材</option>
+                    <option value="營運-清潔與雜項支出">營運-清潔與雜項支出</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-bold text-stone-500 mb-1">品項摘要 / 備註</label>
+                <input type="text" id="inputNotes" class="w-full px-3 py-1.5 rounded-lg border border-stone-300 text-xs" placeholder="例如：美生菜 5 箱、嫩肩梅花豬 10kg">
+              </div>
+            </div>
+          </div>
+
+          <!-- 【主要動作：一鍵確認並直傳 Google 雲端】 -->
+          <div class="pt-2">
+            <button type="button" id="btnSubmitTicket" class="w-full py-4 rounded-2xl bg-liho-green hover:bg-emerald-800 text-white font-black text-base flex items-center justify-center space-x-2 shadow-lg shadow-liho-green/20 active:scale-[0.98] transition-all">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+              <span>確認無誤 • 直傳 Google 試算表</span>
+            </button>
+            <p class="text-[10px] text-center text-liho-muted mt-2">點擊後自動寫入雲端檔案，並備份單據照片</p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 2: 今日已傳紀錄 (卡片清單流) ==================== -->
+    <section id="tabViewHistory" class="hidden space-y-3">
+      <div class="flex items-center justify-between pb-1">
+        <div>
+          <h2 class="text-base font-black text-liho-dark">今日進貨單據</h2>
+          <p class="text-[11px] text-liho-muted">跨手機即時同步 • 點擊照片可放大檢視</p>
+        </div>
+        <button type="button" id="btnRefreshHistory" class="px-2.5 py-1 rounded-lg bg-white border border-stone-200 text-xs font-bold text-liho-dark shadow-sm hover:bg-stone-50 flex items-center space-x-1">
+          <span>🔄 重整雲端</span>
+        </button>
+      </div>
+
+      <!-- 紀錄清單容器 -->
+      <div id="receiptCardList" class="space-y-2.5">
+        <!-- 動態注入卡片 -->
+      </div>
+
+      <!-- 空白狀態提示 -->
+      <div id="emptyHistoryState" class="hidden bg-white rounded-2xl p-8 text-center border border-stone-200 shadow-sm">
+        <div class="text-3xl mb-2">🧾</div>
+        <p class="text-sm font-bold text-liho-dark">今日尚未有進貨紀錄</p>
+        <p class="text-xs text-liho-muted mt-1">請點擊下方「拍照記帳」開始記錄第一張單據</p>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 3: 門市設定與 Apps Script 串接 ==================== -->
+    <section id="tabViewSettings" class="hidden space-y-4">
+      <div class="bg-white rounded-3xl p-5 border border-stone-200 shadow-sm space-y-4">
+        <div>
+          <h2 class="text-base font-black text-liho-dark">門市連線設定</h2>
+          <p class="text-xs text-liho-muted">設定一次，本手機永久記憶</p>
+        </div>
+
+        <!-- Webhook URL 設定 -->
+        <div>
+          <label class="block text-xs font-bold text-liho-dark mb-1">Google Apps Script 部署網址</label>
+          <input type="text" id="settingSheetUrl" class="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs font-mono" placeholder="https://script.google.com/macros/s/.../exec">
+          <p class="text-[11px] text-liho-muted mt-1">請貼上您在 Google 雲端部屬的「網頁應用程式網址」</p>
+        </div>
+
+        <!-- 預設經手人 -->
+        <div>
+          <label class="block text-xs font-bold text-liho-dark mb-1">此手機預設經手人</label>
+          <select id="settingDefaultStaff" class="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs font-bold text-liho-dark bg-white">
+            <option value="惠毓">惠毓</option>
+            <option value="梓庭">梓庭</option>
+            <option value="佩嘉">佩嘉</option>
+            <option value="雨函">雨函</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+
+        <!-- Gemini API Key (可選填，內建預設) -->
+        <div>
+          <label class="block text-xs font-bold text-liho-dark mb-1">自訂 Gemini API Key (選填)</label>
+          <input type="password" id="settingApiKey" class="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs font-mono" placeholder="預設自動連線，若有專屬 Key 可填入">
+        </div>
+
+        <button type="button" id="btnSaveSettings" class="w-full py-3 rounded-xl bg-liho-red hover:bg-liho-redhover text-white font-black text-sm transition-colors shadow-md">
+          儲存門市設定
+        </button>
+      </div>
+
+      <!-- Apps Script 快速指引折疊區 -->
+      <div class="bg-stone-50 rounded-2xl p-4 border border-stone-200 text-xs space-y-2">
+        <h3 class="font-bold text-liho-dark">💡 換新月份需要改網址嗎？</h3>
+        <p class="text-liho-muted leading-relaxed">
+          不需要！只要在「2026帳務」資料夾部署一次總管腳本，系統會自動在該資料夾尋找對應月份（如 202609、202610）。遇到新月份時，更會自動複製「建立副本」範本，完全零維護。
+        </p>
+        <button type="button" id="btnCopyGasCode" class="text-liho-red font-bold underline hover:text-liho-redhover inline-block pt-1">
+          複製 2026帳務專用 Apps Script 腳本程式碼
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 底部固定導覽列 (Native App Tab Bar) -->
+  <nav class="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 shadow-nav">
+    <div class="max-w-md mx-auto grid grid-cols-3 h-16 px-2">
+      
+      <!-- Tab 1: 拍照記帳 -->
+      <button type="button" id="tabBtnScan" class="flex flex-col items-center justify-center space-y-1 text-liho-red font-black transition-colors">
+        <div class="relative">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        </div>
+        <span class="text-[11px] leading-none">拍照記帳</span>
+      </button>
+
+      <!-- Tab 2: 今日單據 (含紅點徽章) -->
+      <button type="button" id="tabBtnHistory" class="flex flex-col items-center justify-center space-y-1 text-stone-400 font-medium hover:text-stone-700 transition-colors">
+        <div class="relative">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+          <span id="tabHistoryBadge" class="hidden absolute -top-1 -right-2.5 px-1.5 py-0.2 bg-liho-red text-white text-[9px] font-black rounded-full">0</span>
+        </div>
+        <span class="text-[11px] leading-none">今日單據</span>
+      </button>
+
+      <!-- Tab 3: 門市設定 -->
+      <button type="button" id="tabBtnSettings" class="flex flex-col items-center justify-center space-y-1 text-stone-400 font-medium hover:text-stone-700 transition-colors">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        <span class="text-[11px] leading-none">設定</span>
+      </button>
+
+    </div>
+  </nav>
+
+  <!-- 彈出視窗 1：防重複單據警示 Modal -->
+  <div id="modalDuplicate" class="fixed inset-0 bg-black/60 z-50 hidden items-center justify-center p-4 backdrop-blur-sm">
+    <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border-2 border-amber-300 text-center animate-bounce-short">
+      <div class="w-14 h-14 mx-auto rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-2xl mb-3">
+        ⚠️
+      </div>
+      <h3 class="text-base font-black text-liho-dark">偵測到疑似重複單據！</h3>
+      <p id="duplicateDescText" class="text-xs text-liho-muted mt-2 leading-relaxed bg-amber-50 p-3 rounded-xl border border-amber-200">
+        系統發現今日已有相同廠商與金額的紀錄。
+      </p>
+
+      <div class="grid grid-cols-2 gap-2 mt-5">
+        <button type="button" id="btnCancelDup" class="py-2.5 px-3 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-black">
+          取消 (避免重複)
+        </button>
+        <button type="button" id="btnForceUploadDup" class="py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black">
+          仍要上傳 (不同單據)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈出視窗 2：大圖檢視 Modal -->
+  <div id="modalPhotoView" class="fixed inset-0 bg-black/90 z-50 hidden items-center justify-center p-4">
+    <button type="button" id="btnClosePhotoModal" class="absolute top-4 right-4 text-white text-2xl p-2 font-bold">✕</button>
+    <img id="fullPhotoViewImg" class="max-w-full max-h-[85vh] object-contain rounded-xl" alt="單據大圖">
+  </div>
+
+  <!-- 浮動訊息 Toast -->
+  <div id="toast" class="fixed top-5 left-1/2 -translate-x-1/2 z-50 hidden px-4 py-2.5 rounded-full text-xs font-black shadow-xl transition-all duration-300 text-center max-w-xs"></div>
+
+  <script>
+    // ========================================================
+    // 門市全域狀態機 (State Management)
+    // ========================================================
+    const STATE = {
+      activeTab: "scan",
+      currentImageData: null,
+      currentRotation: 0,
+      todayRecords: [],
+      pendingRecord: null,
+      sheetUrl: localStorage.getItem("LIHO_SHEET_URL") || "",
+      apiKey: localStorage.getItem("LIHO_API_KEY") || "",
+      defaultStaff: localStorage.getItem("LIHO_DEFAULT_STAFF") || "現場同仁",
+      isProcessing: false
+    };
+
+    // Google Apps Script 後端公版腳本 (點擊複製用)
+    const GAS_TEMPLATE_CODE = `// ==========================================
+// 里好餐桌：2026帳務「自動分流、照片存雲端與跨手機同步」專用腳本
+// ==========================================
+
+var FOLDER_ID = "請在此填入2026帳務資料夾ID"; 
+var TEMPLATE_FILE_NAME = "建立副本"; 
+
+function doGet(e) {
+  try {
+    var folder = DriveApp.getFolderById(FOLDER_ID);
+    var todayStr = Utilities.formatDate(new Date(), "Asia/Taipei", "yyyy-MM-dd");
+    var targetFileName = todayStr.replace(/-/g, "").substring(0, 6);
+    
+    var files = folder.getFilesByName(targetFileName);
+    if (!files.hasNext()) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", records: [] })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    var ss = SpreadsheetApp.openById(files.next().getId());
+    var sheet = ss.getSheets()[0];
+    var data = sheet.getDataRange().getValues();
+    if (data.length <= 1) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", records: [] })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    var todayRecords = [];
+    for (var i = data.length - 1; i >= 1; i--) {
+      var row = data[i];
+      var rowDate = String(row[1]);
+      if (rowDate && rowDate.indexOf(todayStr) !== -1) {
+        todayRecords.push({
+          timestamp: String(row[0]).split(" ")[1] || "",
+          date: rowDate,
+          vendor: row[2],
+          invoiceNo: row[3],
+          category: row[4],
+          totalAmount: Number(row[5]) || 0,
+          paymentMethod: row[8] || "下貨收現",
+          staff: row[9] || "",
+          notes: row[10] || "",
+          photoUrl: row[12] || "",
+          syncStatus: "success"
+        });
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", records: todayRecords })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  lock.tryLock(30000);
+
+  try {
+    var contents = JSON.parse(e.postData.contents);
+    var folder = DriveApp.getFolderById(FOLDER_ID);
+    
+    var dateStr = contents.date || Utilities.formatDate(new Date(), "Asia/Taipei", "yyyy-MM-dd");
+    var targetFileName = dateStr.replace(/-/g, "").substring(0, 6);
+    
+    var targetFile = null;
+    var files = folder.getFilesByName(targetFileName);
+    
+    if (files.hasNext()) {
+      targetFile = files.next();
+    } else {
+      var templateFiles = folder.getFilesByName(TEMPLATE_FILE_NAME);
+      if (templateFiles.hasNext()) {
+        targetFile = templateFiles.next().makeCopy(targetFileName, folder);
+      } else {
+        var newSs = SpreadsheetApp.create(targetFileName);
+        targetFile = DriveApp.getFileById(newSs.getId());
+        folder.addFile(targetFile);
+        DriveApp.getRootFolder().removeFile(targetFile);
+      }
+    }
+    
+    var ss = SpreadsheetApp.openById(targetFile.getId());
+    var sheet = ss.getSheets()[0];
+    
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "建檔時間", "進貨日期", "廠商名稱", "單號/發票", "分類", 
+        "總金額", "未稅金額", "營業稅", "付款方式", "經手人", "備註", "明細", "照片連結"
+      ]);
+    }
+
+    var photoUrl = "";
+    if (contents.imageBase64) {
+      try {
+        var photoFolderName = targetFileName + "_單據照片";
+        var photoFolder = null;
+        var pFolders = folder.getFoldersByName(photoFolderName);
+        photoFolder = pFolders.hasNext() ? pFolders.next() : folder.createFolder(photoFolderName);
+
+        var cleanBase64 = contents.imageBase64.replace(/^data:image\\/(png|jpeg|jpg|webp);base64,/, "");
+        var decoded = Utilities.base64Decode(cleanBase64);
+        var imgBlob = Utilities.newBlob(decoded, contents.imageMime || "image/jpeg", dateStr + "_" + (contents.vendor || "單據") + "_" + (contents.totalAmount || 0) + ".jpg");
+        var savedFile = photoFolder.createFile(imgBlob);
+        photoUrl = savedFile.getUrl();
+      } catch (imgErr) {}
+    }
+    
+    sheet.appendRow([
+      new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }),
+      contents.date || "",
+      contents.vendor || "",
+      contents.invoiceNo || "",
+      contents.category || "",
+      contents.totalAmount || 0,
+      contents.subtotal || "",
+      contents.tax || "",
+      contents.paymentMethod || "下貨收現",
+      contents.staff || "",
+      contents.notes || "",
+      contents.itemsSummary || "",
+      photoUrl || ""
+    ]);
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", photoUrl: photoUrl })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    lock.releaseLock();
+  }
+}`;
+
+    let DOM = {};
+
+    window.addEventListener("DOMContentLoaded", () => {
+      // 快取 DOM 節點
+      DOM = {
+        headerDateDisplay: document.getElementById("headerDateDisplay"),
+        barCount: document.getElementById("barCount"),
+        barTotal: document.getElementById("barTotal"),
+        barFill: document.getElementById("barFill"),
+        btnQuickSync: document.getElementById("btnQuickSync"),
+        syncDot: document.getElementById("syncDot"),
+        syncText: document.getElementById("syncText"),
+
+        // Tabs
+        tabBtnScan: document.getElementById("tabBtnScan"),
+        tabBtnHistory: document.getElementById("tabBtnHistory"),
+        tabBtnSettings: document.getElementById("tabBtnSettings"),
+        tabViewScan: document.getElementById("tabViewScan"),
+        tabViewHistory: document.getElementById("tabViewHistory"),
+        tabViewSettings: document.getElementById("tabViewSettings"),
+        tabHistoryBadge: document.getElementById("tabHistoryBadge"),
+
+        // Inputs & Capture
+        cameraInput: document.getElementById("cameraInput"),
+        galleryInput: document.getElementById("galleryInput"),
+        btnLaunchCamera: document.getElementById("btnLaunchCamera"),
+        btnLaunchGallery: document.getElementById("btnLaunchGallery"),
+        sectionCaptureEntry: document.getElementById("sectionCaptureEntry"),
+        sectionPreviewBox: document.getElementById("sectionPreviewBox"),
+        imgPreview: document.getElementById("imgPreview"),
+        scannerOverlay: document.getElementById("scannerOverlay"),
+        btnRotatePhoto: document.getElementById("btnRotatePhoto"),
+        btnRetakePhoto: document.getElementById("btnRetakePhoto"),
+
+        // Ticket Form
+        targetMonthChip: document.getElementById("targetMonthChip"),
+        inputTotalAmount: document.getElementById("inputTotalAmount"),
+        inputVendor: document.getElementById("inputVendor"),
+        inputDate: document.getElementById("inputDate"),
+        inputStaff: document.getElementById("inputStaff"),
+        inputInvoiceNo: document.getElementById("inputInvoiceNo"),
+        selectCategory: document.getElementById("selectCategory"),
+        inputNotes: document.getElementById("inputNotes"),
+        inputPaymentMethod: document.getElementById("inputPaymentMethod"),
+        btnSubmitTicket: document.getElementById("btnSubmitTicket"),
+
+        // Details toggle
+        btnToggleDetails: document.getElementById("btnToggleDetails"),
+        boxDetails: document.getElementById("boxDetails"),
+        detailToggleText: document.getElementById("detailToggleText"),
+        detailToggleIcon: document.getElementById("detailToggleIcon"),
+
+        // Modals & Lists
+        receiptCardList: document.getElementById("receiptCardList"),
+        emptyHistoryState: document.getElementById("emptyHistoryState"),
+        modalDuplicate: document.getElementById("modalDuplicate"),
+        duplicateDescText: document.getElementById("duplicateDescText"),
+        btnCancelDup: document.getElementById("btnCancelDup"),
+        btnForceUploadDup: document.getElementById("btnForceUploadDup"),
+        modalPhotoView: document.getElementById("modalPhotoView"),
+        fullPhotoViewImg: document.getElementById("fullPhotoViewImg"),
+        btnClosePhotoModal: document.getElementById("btnClosePhotoModal"),
+        toast: document.getElementById("toast"),
+
+        // Settings
+        settingSheetUrl: document.getElementById("settingSheetUrl"),
+        settingDefaultStaff: document.getElementById("settingDefaultStaff"),
+        settingApiKey: document.getElementById("settingApiKey"),
+        btnSaveSettings: document.getElementById("btnSaveSettings"),
+        btnCopyGasCode: document.getElementById("btnCopyGasCode"),
+        btnRefreshHistory: document.getElementById("btnRefreshHistory")
+      };
+
+      initApp();
+    });
+
+    function initApp() {
+      // 1. 初始化日期
+      const now = new Date();
+      const dateStr = now.toISOString().split("T")[0];
+      if (DOM.inputDate) DOM.inputDate.value = dateStr;
+      
+      const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+      const displayDate = `${now.getMonth() + 1}月${now.getDate()}日 (週${weekdays[now.getDay()]})`;
+      if (DOM.headerDateDisplay) DOM.headerDateDisplay.textContent = displayDate;
+      updateTargetMonthBadge(dateStr);
+
+      // 2. 初始化設定值與預設經手同仁
+      if (DOM.settingSheetUrl) DOM.settingSheetUrl.value = STATE.sheetUrl;
+      if (DOM.settingApiKey) DOM.settingApiKey.value = STATE.apiKey;
+      
+      // 預設經手人（惠毓、梓庭、佩嘉、雨函、其他）
+      const validStaff = ["惠毓", "梓庭", "佩嘉", "雨函", "其他"];
+      if (!validStaff.includes(STATE.defaultStaff)) {
+        STATE.defaultStaff = "惠毓";
+      }
+      if (DOM.settingDefaultStaff) DOM.settingDefaultStaff.value = STATE.defaultStaff;
+      if (DOM.inputStaff) DOM.inputStaff.value = STATE.defaultStaff;
+      highlightStaffButton(STATE.defaultStaff);
+
+      // 3. 讀取今日快取
+      loadLocalRecords();
+      updateDashboard();
+
+      // 4. 綁定事件監聽器
+      bindEvents();
+
+      // 5. 若已有 Webhook 網址，背景自動拉取今日試算表清單
+      if (STATE.sheetUrl) {
+        fetchTodaySheetRecords();
+      }
+    }
+
+    function highlightStaffButton(staffName) {
+      document.querySelectorAll(".btn-staff-pill").forEach(btn => {
+        if (btn.getAttribute("data-staff") === staffName) {
+          btn.classList.add("border-liho-red", "bg-liho-redlight", "text-liho-red", "font-black", "ring-1", "ring-liho-red");
+          btn.classList.remove("border-stone-200", "bg-stone-50", "text-stone-700");
+        } else {
+          btn.classList.remove("border-liho-red", "bg-liho-redlight", "text-liho-red", "font-black", "ring-1", "ring-liho-red");
+          btn.classList.add("border-stone-200", "bg-stone-50", "text-stone-700");
+        }
+      });
+    }
+
+    function updateTargetMonthBadge(dateStr) {
+      if (!dateStr) return;
+      const clean = dateStr.replace(/-/g, "").substring(0, 6);
+      if (DOM.targetMonthChip) DOM.targetMonthChip.textContent = clean;
+    }
+
+    function bindEvents() {
+      // Tab 切換
+      DOM.tabBtnScan?.addEventListener("click", () => switchTab("scan"));
+      DOM.tabBtnHistory?.addEventListener("click", () => switchTab("history"));
+      DOM.tabBtnSettings?.addEventListener("click", () => switchTab("settings"));
+
+      // 相機與相簿喚起
+      DOM.btnLaunchCamera?.addEventListener("click", () => DOM.cameraInput?.click());
+      DOM.btnLaunchGallery?.addEventListener("click", () => DOM.galleryInput?.click());
+      DOM.cameraInput?.addEventListener("change", handleFileSelect);
+      DOM.galleryInput?.addEventListener("change", handleFileSelect);
+
+      // 圖片工具
+      DOM.btnRotatePhoto?.addEventListener("click", rotatePhoto);
+      DOM.btnRetakePhoto?.addEventListener("click", resetCapture);
+
+      // 付款方式 3 顆大按鈕切換
+      document.querySelectorAll(".btn-payment-pill").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const val = btn.getAttribute("data-val");
+          DOM.inputPaymentMethod.value = val;
+          document.querySelectorAll(".btn-payment-pill").forEach(b => {
+            b.classList.remove("border-liho-red", "bg-liho-red", "text-white");
+            b.classList.add("border-stone-200", "bg-stone-50", "text-stone-600");
+          });
+          btn.classList.add("border-liho-red", "bg-liho-red", "text-white");
+          btn.classList.remove("border-stone-200", "bg-stone-50", "text-stone-600");
+        });
+      });
+
+      // 常用廠商 Tag 一鍵填入
+      document.querySelectorAll(".btn-vendor-tag").forEach(tag => {
+        tag.addEventListener("click", () => {
+          if (DOM.inputVendor) {
+            DOM.inputVendor.value = tag.textContent.trim();
+            DOM.inputVendor.focus();
+          }
+        });
+      });
+
+      // 經手同仁按鈕切換
+      document.querySelectorAll(".btn-staff-pill").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const staffName = btn.getAttribute("data-staff");
+          if (DOM.inputStaff) {
+            if (staffName === "其他") {
+              DOM.inputStaff.readOnly = false;
+              DOM.inputStaff.value = "";
+              DOM.inputStaff.placeholder = "請手動輸入同仁姓名...";
+              DOM.inputStaff.focus();
+            } else {
+              DOM.inputStaff.readOnly = true;
+              DOM.inputStaff.value = staffName;
+            }
+          }
+          highlightStaffButton(staffName);
+        });
+      });
+
+      // 進階資訊折疊切換
+      DOM.btnToggleDetails?.addEventListener("click", () => {
+        const isHidden = DOM.boxDetails.classList.contains("hidden");
+        if (isHidden) {
+          DOM.boxDetails.classList.remove("hidden");
+          DOM.detailToggleText.textContent = "－ 收起次要資訊";
+          DOM.detailToggleIcon.classList.add("rotate-180");
+        } else {
+          DOM.boxDetails.classList.add("hidden");
+          DOM.detailToggleText.textContent = "＋ 展開次要資訊 (發票號碼、分類、明細)";
+          DOM.detailToggleIcon.classList.remove("rotate-180");
+        }
+      });
+
+      // 日期改變連動月份
+      DOM.inputDate?.addEventListener("change", (e) => {
+        updateTargetMonthBadge(e.target.value);
+      });
+
+      // 送出核對
+      DOM.btnSubmitTicket?.addEventListener("click", () => handleTicketSubmit(false));
+
+      // 重複警示 Modal 按鈕
+      DOM.btnCancelDup?.addEventListener("click", () => {
+        DOM.modalDuplicate?.classList.add("hidden");
+        DOM.modalDuplicate?.classList.remove("flex");
+        STATE.pendingRecord = null;
+      });
+      DOM.btnForceUploadDup?.addEventListener("click", () => {
+        DOM.modalDuplicate?.classList.add("hidden");
+        DOM.modalDuplicate?.classList.remove("flex");
+        if (STATE.pendingRecord) {
+          uploadRecordToSheet(STATE.pendingRecord, true);
+        }
+      });
+
+      // 設定儲存
+      DOM.btnSaveSettings?.addEventListener("click", saveSettings);
+      DOM.btnCopyGasCode?.addEventListener("click", copyGasCode);
+      DOM.btnRefreshHistory?.addEventListener("click", fetchTodaySheetRecords);
+      DOM.btnQuickSync?.addEventListener("click", fetchTodaySheetRecords);
+
+      // 大圖 Modal 關閉
+      DOM.btnClosePhotoModal?.addEventListener("click", () => {
+        DOM.modalPhotoView?.classList.add("hidden");
+        DOM.modalPhotoView?.classList.remove("flex");
+      });
+      DOM.modalPhotoView?.addEventListener("click", (e) => {
+        if (e.target === DOM.modalPhotoView) {
+          DOM.modalPhotoView?.classList.add("hidden");
+          DOM.modalPhotoView?.classList.remove("flex");
+        }
+      });
+    }
+
+    function switchTab(tabId) {
+      STATE.activeTab = tabId;
+      // 隱藏全部
+      DOM.tabViewScan?.classList.add("hidden");
+      DOM.tabViewHistory?.classList.add("hidden");
+      DOM.tabViewSettings?.classList.add("hidden");
+
+      // 還原 Nav 樣式
+      const navBtns = [DOM.tabBtnScan, DOM.tabBtnHistory, DOM.tabBtnSettings];
+      navBtns.forEach(btn => {
+        btn?.classList.remove("text-liho-red", "font-black");
+        btn?.classList.add("text-stone-400", "font-medium");
+      });
+
+      if (tabId === "scan") {
+        DOM.tabViewScan?.classList.remove("hidden");
+        DOM.tabBtnScan?.classList.add("text-liho-red", "font-black");
+        DOM.tabBtnScan?.classList.remove("text-stone-400", "font-medium");
+      } else if (tabId === "history") {
+        DOM.tabViewHistory?.classList.remove("hidden");
+        DOM.tabBtnHistory?.classList.add("text-liho-red", "font-black");
+        DOM.tabBtnHistory?.classList.remove("text-stone-400", "font-medium");
+        renderHistoryList();
+      } else if (tabId === "settings") {
+        DOM.tabViewSettings?.classList.remove("hidden");
+        DOM.tabBtnSettings?.classList.add("text-liho-red", "font-black");
+        DOM.tabBtnSettings?.classList.remove("text-stone-400", "font-medium");
+      }
+    }
+
+    function handleFileSelect(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        STATE.currentImageData = evt.target.result;
+        STATE.currentRotation = 0;
+        
+        // 顯示預覽框並開始掃描
+        if (DOM.imgPreview) {
+          DOM.imgPreview.src = STATE.currentImageData;
+          DOM.imgPreview.style.transform = `rotate(0deg)`;
+        }
+        DOM.sectionPreviewBox?.classList.remove("hidden");
+        DOM.sectionCaptureEntry?.classList.add("hidden");
+
+        // 觸發 AI 解析
+        performGeminiOcr(STATE.currentImageData);
+      };
+      reader.readAsDataURL(file);
+      e.target.value = ""; // 清空 input 允許拍同一張
+    }
+
+    function rotatePhoto() {
+      if (!STATE.currentImageData) return;
+      STATE.currentRotation = (STATE.currentRotation + 90) % 360;
+      if (DOM.imgPreview) {
+        DOM.imgPreview.style.transform = `rotate(${STATE.currentRotation}deg)`;
+      }
+    }
+
+    function resetCapture() {
+      STATE.currentImageData = null;
+      STATE.currentRotation = 0;
+      DOM.sectionPreviewBox?.classList.add("hidden");
+      DOM.sectionCaptureEntry?.classList.remove("hidden");
+      DOM.inputTotalAmount.value = "";
+      DOM.inputVendor.value = "";
+      DOM.inputInvoiceNo.value = "";
+      DOM.inputNotes.value = "";
+    }
+
+    // 呼叫 Gemini 3 Flash 進行精準視覺萃取
+    async function performGeminiOcr(base64Data) {
+      DOM.scannerOverlay?.classList.remove("hidden");
+
+      const systemPrompt = `你是一位專業的餐飲業「里好餐桌」店長與會計助理，專門審核門市進貨單、送貨簽單與發票。
+
+門市 20 家常態合作廠商名單（若單據模糊、印章不全或為手寫單，請優先從此清單比對匹配）：
+- 德麥
+- 憶霖
+- 富盈
+- 第一饗
+- 鴻品
+- 凱燁
+- 樹森
+- 有心
+- Agogo
+- 美金
+- 三佳
+- 恬芯
+- 鼎鎂
+- 源品
+- 潞運
+- 麻辣
+- 好市多
+- 開元
+- 檸檬先生
+- 親民
+
+門市經手同仁名單（若單據簽收欄有簽名或註記，請優先比對）：
+- 惠毓、梓庭、佩嘉、雨函、其他
+
+請從這張進貨單據照片中辨識出關鍵欄位，並直接回傳乾淨的 JSON：
+{
+  "vendor": "廠商名稱 (若符合上述 20 家常態廠商請直接精確對齊，例如：德麥、樹森、第一饗、開元等)",
+  "totalAmount": 1250,
+  "date": "YYYY-MM-DD (若無年份請以 2026 年為主)",
+  "invoiceNo": "發票號碼或出貨單號 (若無請填空字串)",
+  "category": "食材-肉品海鮮蛋白質",
+  "paymentMethod": "下貨收現 或 廠商月結 或 已匯款",
+  "notes": "主要品項摘要",
+  "staff": "辨識到的同仁簽名 (若無則留空)"
+}
+分類選項限用：
+- 食材-生鮮蔬果配菜
+- 食材-肉品海鮮蛋白質
+- 食材-胚芽米麵食五穀
+- 醬料-沙拉醬與特調醬
+- 茶飲-高山茶與飲品原物料
+- 耗材-外帶餐盒包材
+- 營運-清潔與雜項支出`;
+
+      try {
+        const cleanBase64 = base64Data.split(",")[1] || base64Data;
+        const apiKey = STATE.apiKey || "";
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+        const payload = {
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{
+            parts: [
+              { text: "請辨識這張進貨單據並回傳 JSON。" },
+              { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
+            ]
+          }],
+          generationConfig: { responseMimeType: "application/json" }
+        };
+
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        const rawJsonText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawJsonText) throw new Error("AI 未回傳有效辨識文字");
+
+        const parsed = JSON.parse(rawJsonText);
+        applyOcrResultToForm(parsed);
+        showToast("✨ AI 辨識完成！請快速核對金額", "success");
+      } catch (err) {
+        console.warn("AI 辨識提示:", err);
+        showToast("已拍照，請手動確認廠商與金額", "warning");
+      } finally {
+        DOM.scannerOverlay?.classList.add("hidden");
+      }
+    }
+
+    function applyOcrResultToForm(data) {
+      if (data.totalAmount && DOM.inputTotalAmount) {
+        DOM.inputTotalAmount.value = data.totalAmount;
+      }
+      if (data.vendor && DOM.inputVendor) {
+        DOM.inputVendor.value = data.vendor;
+      }
+      if (data.date && DOM.inputDate) {
+        DOM.inputDate.value = data.date;
+        updateTargetMonthBadge(data.date);
+      }
+      if (data.invoiceNo && DOM.inputInvoiceNo) {
+        DOM.inputInvoiceNo.value = data.invoiceNo;
+      }
+      if (data.category && DOM.selectCategory) {
+        DOM.selectCategory.value = data.category;
+      }
+      if (data.notes && DOM.inputNotes) {
+        DOM.inputNotes.value = data.notes;
+      }
+      if (data.staff && ["惠毓", "梓庭", "佩嘉", "雨函", "其他"].includes(data.staff)) {
+        if (DOM.inputStaff) {
+          DOM.inputStaff.value = data.staff;
+          DOM.inputStaff.readOnly = data.staff !== "其他";
+        }
+        highlightStaffButton(data.staff);
+      }
+
+      // 智能匹配付款方式
+      if (data.paymentMethod) {
+        const match = ["下貨收現", "廠商月結", "已匯款"].find(p => data.paymentMethod.includes(p));
+        if (match) {
+          const targetBtn = document.querySelector(`.btn-payment-pill[data-val="${match}"]`);
+          if (targetBtn) targetBtn.click();
+        }
+      }
+    }
+
+    async function handleTicketSubmit(force = false) {
+      if (STATE.isProcessing) return;
+
+      const totalAmount = Number(DOM.inputTotalAmount.value) || 0;
+      const vendor = DOM.inputVendor.value.trim();
+      const date = DOM.inputDate.value || new Date().toISOString().split("T")[0];
+      const invoiceNo = DOM.inputInvoiceNo.value.trim();
+
+      // 基礎驗證
+      if (!vendor) {
+        showToast("請填寫廠商名稱！", "warning");
+        DOM.inputVendor.focus();
+        return;
+      }
+      if (totalAmount <= 0) {
+        showToast("請輸入正確的進貨金額！", "warning");
+        DOM.inputTotalAmount.focus();
+        return;
+      }
+
+      // 天價防呆 (例如多按一個 0)
+      if (totalAmount > 30000 && !force) {
+        if (!confirm(`⚠️ 本筆金額為 NT$ ${totalAmount.toLocaleString()}，是否確認無誤？`)) {
+          return;
+        }
+      }
+
+      const newRecord = {
+        id: "REC-" + Date.now(),
+        timestamp: new Date().toLocaleTimeString("zh-TW", { hour12: false }),
+        date: date,
+        vendor: vendor,
+        invoiceNo: invoiceNo,
+        category: DOM.selectCategory.value,
+        totalAmount: totalAmount,
+        paymentMethod: DOM.inputPaymentMethod.value,
+        staff: DOM.inputStaff.value.trim() || STATE.defaultStaff,
+        notes: DOM.inputNotes.value.trim(),
+        imagePreview: STATE.currentImageData || "",
+        syncStatus: "pending"
+      };
+
+      // 防重複檢測
+      if (!force) {
+        const dup = checkDuplicate(newRecord);
+        if (dup) {
+          STATE.pendingRecord = newRecord;
+          DOM.duplicateDescText.innerHTML = `系統發現今日已有一筆紀錄：<br><strong class="text-liho-dark">${dup.vendor}</strong>・金額 <strong>$${dup.totalAmount.toLocaleString()}</strong><br>經手人：${dup.staff || '門市同仁'} (${dup.timestamp})`;
+          DOM.modalDuplicate?.classList.remove("hidden");
+          DOM.modalDuplicate?.classList.add("flex");
+          return;
+        }
+      }
+
+      await uploadRecordToSheet(newRecord, force);
+    }
+
+    function checkDuplicate(rec) {
+      return STATE.todayRecords.find(item => {
+        if (rec.invoiceNo && item.invoiceNo && rec.invoiceNo === item.invoiceNo) return true;
+        if (item.vendor === rec.vendor && Number(item.totalAmount) === Number(rec.totalAmount)) return true;
+        return false;
+      });
+    }
+
+    async function uploadRecordToSheet(record, force = false) {
+      if (!STATE.sheetUrl) {
+        showToast("尚未設定 Google 網頁應用程式網址！", "warning");
+        switchTab("settings");
+        return;
+      }
+
+      STATE.isProcessing = true;
+      DOM.btnSubmitTicket.disabled = true;
+      DOM.btnSubmitTicket.innerHTML = `<span class="inline-block animate-spin mr-2">⏳</span> 正在寫入 Google Sheet...`;
+
+      try {
+        // 照片壓縮
+        let compressedBase64 = "";
+        if (STATE.currentImageData) {
+          compressedBase64 = await compressImage(STATE.currentImageData, 1200, 0.75);
+        }
+
+        const payload = {
+          ...record,
+          force: force,
+          imageBase64: compressedBase64,
+          imageMime: "image/jpeg"
+        };
+
+        // 發送至 GAS
+        await fetch(STATE.sheetUrl, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        record.syncStatus = "success";
+        STATE.todayRecords.unshift(record);
+        saveLocalRecords();
+        updateDashboard();
+
+        showToast("🎉 成功寫入 Google 試算表與雲端照片！", "success");
+        resetCapture();
+
+        // 自動跳至今日清單讓同仁安心
+        switchTab("history");
+
+      } catch (err) {
+        console.error("同步失敗:", err);
+        record.syncStatus = "failed";
+        STATE.todayRecords.unshift(record);
+        saveLocalRecords();
+        updateDashboard();
+        showToast("已存於手機本機，連線恢復後自動補傳", "warning");
+      } finally {
+        STATE.isProcessing = false;
+        DOM.btnSubmitTicket.disabled = false;
+        DOM.btnSubmitTicket.innerHTML = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>確認無誤 • 直傳 Google 試算表</span>`;
+      }
+    }
+
+    function compressImage(base64Str, maxWidth = 1200, quality = 0.75) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          let w = img.width;
+          let h = img.height;
+          if (w > maxWidth || h > maxWidth) {
+            if (w > h) {
+              h = Math.round((h * maxWidth) / w);
+              w = maxWidth;
+            } else {
+              w = Math.round((w * maxWidth) / h);
+              h = maxWidth;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.onerror = () => resolve(base64Str);
+        img.src = base64Str;
+      });
+    }
+
+    function renderHistoryList() {
+      if (!DOM.receiptCardList) return;
+      DOM.receiptCardList.innerHTML = "";
+
+      if (STATE.todayRecords.length === 0) {
+        DOM.emptyHistoryState?.classList.remove("hidden");
+        return;
+      }
+      DOM.emptyHistoryState?.classList.add("hidden");
+
+      STATE.todayRecords.forEach((rec, idx) => {
+        const card = document.createElement("div");
+        card.className = "bg-white rounded-2xl p-3.5 border border-stone-200 shadow-sm flex items-center justify-between";
+
+        const paymentColor = rec.paymentMethod === "下貨收現" ? "text-liho-red bg-liho-redlight" : "text-stone-600 bg-stone-100";
+        
+        let thumbHtml = rec.imagePreview 
+          ? `<img src="${rec.imagePreview}" class="w-12 h-12 object-cover rounded-xl border border-stone-200 cursor-pointer btn-view-photo" data-img="${rec.imagePreview}">`
+          : (rec.photoUrl 
+            ? `<a href="${rec.photoUrl}" target="_blank" class="w-12 h-12 rounded-xl bg-liho-sand/40 flex flex-col items-center justify-center text-[10px] font-bold text-liho-red">☁️照片</a>`
+            : `<div class="w-12 h-12 rounded-xl bg-stone-100 flex items-center justify-center text-xs text-stone-400">無圖</div>`);
+
+        card.innerHTML = `
+          <div class="flex items-center space-x-3">
+            ${thumbHtml}
+            <div>
+              <div class="flex items-center space-x-1.5">
+                <span class="font-black text-sm text-liho-dark">${rec.vendor}</span>
+                <span class="px-1.5 py-0.2 rounded text-[10px] font-bold ${paymentColor}">${rec.paymentMethod}</span>
+              </div>
+              <p class="text-[11px] text-liho-muted mt-0.5">
+                ${rec.timestamp || ''} • 經手：${rec.staff || '同仁'}
+              </p>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="font-mono font-black text-base text-liho-red">NT$ ${(rec.totalAmount || 0).toLocaleString()}</div>
+            <span class="text-[10px] font-bold text-emerald-600">✓ 已同步</span>
+          </div>
+        `;
+
+        const imgEl = card.querySelector(".btn-view-photo");
+        if (imgEl) {
+          imgEl.addEventListener("click", () => {
+            if (DOM.fullPhotoViewImg) DOM.fullPhotoViewImg.src = imgEl.getAttribute("data-img");
+            DOM.modalPhotoView?.classList.remove("hidden");
+            DOM.modalPhotoView?.classList.add("flex");
+          });
+        }
+
+        DOM.receiptCardList.appendChild(card);
+      });
+    }
+
+    async function fetchTodaySheetRecords() {
+      if (!STATE.sheetUrl) return;
+      
+      DOM.syncDot?.classList.remove("bg-emerald-400");
+      DOM.syncDot?.classList.add("bg-amber-400", "animate-ping");
+      DOM.syncText.textContent = "同步中...";
+
+      try {
+        const res = await fetch(STATE.sheetUrl, { method: "GET" });
+        const json = await res.json();
+        if (json.status === "success" && Array.isArray(json.records)) {
+          // 合併雲端與本地紀錄
+          STATE.todayRecords = json.records;
+          saveLocalRecords();
+          updateDashboard();
+          renderHistoryList();
+          DOM.syncText.textContent = "雲端即時";
+          DOM.syncDot?.classList.remove("bg-amber-400", "animate-ping");
+          DOM.syncDot?.classList.add("bg-emerald-400");
+        }
+      } catch (err) {
+        console.warn("無法即時拉取雲端紀錄:", err);
+        DOM.syncText.textContent = "離線模式";
+        DOM.syncDot?.classList.remove("bg-amber-400", "animate-ping");
+        DOM.syncDot?.classList.add("bg-stone-400");
+      }
+    }
+
+    function updateDashboard() {
+      const count = STATE.todayRecords.length;
+      const total = STATE.todayRecords.reduce((sum, r) => sum + (Number(r.totalAmount) || 0), 0);
+      const DAILY_TARGET = 20;
+
+      if (DOM.barCount) DOM.barCount.textContent = `${count} / ${DAILY_TARGET}`;
+      if (DOM.barTotal) DOM.barTotal.textContent = `NT$ ${total.toLocaleString()}`;
+      
+      const pct = Math.min(Math.round((count / DAILY_TARGET) * 100), 100);
+      if (DOM.barFill) DOM.barFill.style.width = `${pct}%`;
+
+      if (DOM.tabHistoryBadge) {
+        if (count > 0) {
+          DOM.tabHistoryBadge.textContent = count;
+          DOM.tabHistoryBadge.classList.remove("hidden");
+        } else {
+          DOM.tabHistoryBadge.classList.add("hidden");
+        }
+      }
+    }
+
+    function saveLocalRecords() {
+      localStorage.setItem("LIHO_TODAY_REC_" + (DOM.inputDate?.value || "TODAY"), JSON.stringify(STATE.todayRecords));
+    }
+
+    function loadLocalRecords() {
+      const saved = localStorage.getItem("LIHO_TODAY_REC_" + (DOM.inputDate?.value || "TODAY"));
+      if (saved) {
+        try { STATE.todayRecords = JSON.parse(saved); } catch (e) {}
+      }
+    }
+
+    function saveSettings() {
+      const url = DOM.settingSheetUrl.value.trim();
+      const staff = DOM.settingDefaultStaff.value.trim();
+      const key = DOM.settingApiKey.value.trim();
+
+      STATE.sheetUrl = url;
+      STATE.defaultStaff = staff || "現場同仁";
+      STATE.apiKey = key;
+
+      localStorage.setItem("LIHO_SHEET_URL", url);
+      localStorage.setItem("LIHO_DEFAULT_STAFF", STATE.defaultStaff);
+      localStorage.setItem("LIHO_API_KEY", key);
+
+      showToast("門市設定已成功儲存！", "success");
+      switchTab("scan");
+      fetchTodaySheetRecords();
+    }
+
+    function copyGasCode() {
+      const tempArea = document.createElement("textarea");
+      tempArea.value = GAS_TEMPLATE_CODE;
+      document.body.appendChild(tempArea);
+      tempArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(tempArea);
+      showToast("已成功複製 Apps Script 程式碼！", "success");
+    }
+
+    function showToast(msg, type = "info") {
+      if (!DOM.toast) return;
+      DOM.toast.textContent = msg;
+      DOM.toast.className = "fixed top-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-full text-xs font-black shadow-xl transition-all duration-300 text-center max-w-xs";
+
+      if (type === "success") {
+        DOM.toast.classList.add("bg-emerald-600", "text-white");
+      } else if (type === "warning") {
+        DOM.toast.classList.add("bg-amber-500", "text-white");
+      } else {
+        DOM.toast.classList.add("bg-stone-800", "text-white");
+      }
+
+      DOM.toast.classList.remove("hidden");
+      setTimeout(() => {
+        DOM.toast.classList.add("hidden");
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
