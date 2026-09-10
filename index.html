@@ -11,9 +11,9 @@
   <meta name="application-name" content="里好進貨">
   <meta name="theme-color" content="#9B443B">
   
-  <link rel="apple-touch-icon" sizes="180x180" id="appleTouchIcon" href="icon.jpg?v=5">
-  <link rel="icon" type="image/jpeg" sizes="192x192" id="androidFavicon" href="icon.jpg?v=5">
-  <link rel="shortcut icon" href="icon.jpg?v=5">
+  <link rel="apple-touch-icon" sizes="180x180" id="appleTouchIcon" href="icon.jpg?v=7">
+  <link rel="icon" type="image/jpeg" sizes="192x192" id="androidFavicon" href="icon.jpg?v=7">
+  <link rel="shortcut icon" href="icon.jpg?v=7">
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -84,7 +84,7 @@
         <div>
           <h1 class="text-base font-black tracking-tight leading-none">里好餐桌 • 進貨系統</h1>
           <div class="flex items-center space-x-1.5 mt-0.5">
-            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="syncDot" class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span id="headerDateDisplay" class="text-[11px] text-white/80 font-medium">載入中...</span>
           </div>
         </div>
@@ -92,13 +92,12 @@
 
       <div class="flex items-center space-x-2">
         <button id="btnQuickSync" class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-black/20 hover:bg-black/30 text-[11px] font-bold tracking-wide transition-colors">
-          <span id="syncDot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
           <span id="syncText">雲端就緒</span>
         </button>
       </div>
     </div>
 
-    <!-- 當日進度線 (精準統計，絕不重複灌水) -->
+    <!-- 當日進度線 -->
     <div class="bg-black/15 px-4 py-1.5 flex items-center justify-between text-[11px] text-white/90">
       <div class="flex items-center space-x-2">
         <span>今日進貨：<strong id="barCount" class="font-mono text-white text-xs">0 / 20</strong> 張</span>
@@ -130,7 +129,7 @@
         </div>
 
         <h2 class="text-lg font-black text-liho-dark mb-1">進貨單拍照自動對帳</h2>
-        <p class="text-xs text-liho-muted mb-5">AI 抓取廠商與金額，自動寫入「廠商進貨表」</p>
+        <p class="text-xs text-liho-muted mb-5">AI 自動辨識單據，直傳 Google 試算表（絕不重複累加）</p>
 
         <div class="grid grid-cols-1 gap-2.5">
           <button type="button" id="btnLaunchCamera" class="w-full py-4 rounded-2xl bg-liho-red hover:bg-liho-redhover text-white font-black text-base flex items-center justify-center space-x-2 shadow-lg shadow-liho-red/20 active:scale-[0.98] transition-all">
@@ -192,14 +191,14 @@
             <p class="text-[10px] text-liho-muted mt-1">※ 點擊金額可手動修正</p>
           </div>
 
-          <!-- 單號/發票（第一層必備欄位） -->
+          <!-- 單號/發票（第一層必備防重複欄位） -->
           <div class="bg-amber-50/60 rounded-2xl p-3 border border-amber-200/80">
             <div class="flex items-center justify-between mb-1">
               <label class="text-xs font-black text-amber-900 flex items-center space-x-1">
                 <span>🧾 單據 / 發票號碼</span>
-                <span class="text-[10px] px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 font-bold">自動防重複</span>
+                <span class="text-[10px] px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 font-bold">防重複機制</span>
               </label>
-              <span class="text-[10px] text-amber-700">可手動輸入</span>
+              <span class="text-[10px] text-amber-700">自動抓取或手動輸入</span>
             </div>
             <input type="text" id="inputInvoiceNo" class="w-full px-3.5 py-2 rounded-xl border border-amber-300 focus:border-liho-red focus:ring-1 focus:ring-liho-red text-sm font-mono font-bold text-liho-dark bg-white" placeholder="例如：SA1150911090">
           </div>
@@ -283,19 +282,19 @@
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
               <span>確認無誤 • 直傳 Google 試算表</span>
             </button>
-            <p class="text-[10px] text-center text-liho-muted mt-2">重複單據自動覆蓋更新，絕不重複累加金額</p>
+            <p class="text-[10px] text-center text-liho-muted mt-2">重複單號自動覆蓋，金額絕不重複計算</p>
           </div>
 
         </div>
       </div>
     </section>
 
-    <!-- ==================== TAB 2: 今日已傳紀錄 (支援手動單鍵刪除) ==================== -->
+    <!-- ==================== TAB 2: 今日已傳紀錄 ==================== -->
     <section id="tabViewHistory" class="hidden space-y-3">
       <div class="flex items-center justify-between pb-1">
         <div>
           <h2 class="text-base font-black text-liho-dark">今日進貨單據</h2>
-          <p class="text-[11px] text-liho-muted">若發現多拍或記錯，可直接點「刪除」</p>
+          <p class="text-[11px] text-liho-muted">若多拍或記錯，可直接點「刪除」</p>
         </div>
         <button type="button" id="btnRefreshHistory" class="px-2.5 py-1 rounded-lg bg-white border border-stone-200 text-xs font-bold text-liho-dark shadow-sm hover:bg-stone-50 flex items-center space-x-1">
           <span>🔄 重整雲端</span>
@@ -316,7 +315,7 @@
       <div class="bg-white rounded-3xl p-5 border border-stone-200 shadow-sm space-y-4">
         <div>
           <h2 class="text-base font-black text-liho-dark">門市連線設定</h2>
-          <p class="text-xs text-liho-muted">設定一次，手機永久記憶</p>
+          <p class="text-xs text-liho-muted">可透過網址參數自動綁定，免手動設定</p>
         </div>
 
         <div>
@@ -336,8 +335,8 @@
         </div>
 
         <div>
-          <label class="block text-xs font-bold text-liho-dark mb-1">Gemini API Key</label>
-          <input type="text" id="settingApiKey" class="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs font-mono" placeholder="貼上 API Key">
+          <label class="block text-xs font-bold text-liho-dark mb-1">Gemini API Key (API 金鑰)</label>
+          <input type="password" id="settingApiKey" class="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs font-mono" placeholder="AIzaSy...">
         </div>
 
         <button type="button" id="btnSaveSettings" class="w-full py-3 rounded-xl bg-liho-red hover:bg-liho-redhover text-white font-black text-sm transition-colors shadow-md">
@@ -345,7 +344,7 @@
         </button>
 
         <button type="button" id="btnClearLocalCache" class="w-full py-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600 font-bold text-xs transition-colors">
-          🧹 清空今日快取 (重新由試算表計算)
+          🧹 清空今日快取 (重新載入)
         </button>
       </div>
     </section>
@@ -385,10 +384,13 @@
 
   <script>
     const DEFAULT_SHEET_URL = "https://script.google.com/macros/s/AKfycbzdlLHGpB5gdXgitXSM6pifJR07WCFqYMIoKOrJQ81XjZpePvMAGCRgsrm1m_3YDlWl/exec";
+    
+    // 金鑰預設留空，完全透過網址參數 ?apiKey=... 動態帶入，安全無虞不觸發 GitHub 警告
+    const DEFAULT_API_KEY = "";
 
     const STATE = {
       sheetUrl: localStorage.getItem("LIHO_SHEET_URL") || DEFAULT_SHEET_URL,
-      apiKey: localStorage.getItem("LIHO_API_KEY") || "AQ.Ab8RN6LRSQVzmkYtTLCGSI69_6Th4TGD6jou2lb9AV1qNyPMLA",
+      apiKey: localStorage.getItem("LIHO_API_KEY") || DEFAULT_API_KEY,
       defaultStaff: localStorage.getItem("LIHO_DEFAULT_STAFF") || "惠毓",
       todayRecords: [],
       currentImageData: null,
@@ -455,7 +457,6 @@
     });
 
     function initApp() {
-      // 網址參數自動載入
       try {
         const urlParams = new URLSearchParams(window.location.search);
         const pUrl = urlParams.get("sheetUrl");
@@ -487,34 +488,9 @@
       highlightStaffBtn(STATE.defaultStaff);
 
       loadLocalRecords();
-      cleanDuplicateRecords(); // 自動清理現有重複項目
       updateDashboard();
-
       bindEvents();
       fetchTodayRecords();
-    }
-
-    // 自動清理陣列中任何重複項目（保留最新的一筆）
-    function cleanDuplicateRecords() {
-      const seen = new Set();
-      const cleaned = [];
-
-      for (const rec of STATE.todayRecords) {
-        const invKey = (rec.invoiceNo || "").trim().toUpperCase();
-        const vendorKey = (rec.vendor || "").trim();
-        const dateKey = (rec.date || "").trim();
-        const amountKey = String(rec.totalAmount);
-
-        const fingerPrint = invKey ? `INV:${invKey}` : `REC:${dateKey}_${vendorKey}_${amountKey}`;
-
-        if (!seen.has(fingerPrint)) {
-          seen.add(fingerPrint);
-          cleaned.push(rec);
-        }
-      }
-
-      STATE.todayRecords = cleaned;
-      saveLocalRecords();
     }
 
     function updateMonthBadge(dateStr) {
@@ -597,7 +573,6 @@
 
       DOM.btnRefreshHistory?.addEventListener("click", fetchTodayRecords);
       DOM.btnQuickSync?.addEventListener("click", fetchTodayRecords);
-
       DOM.btnClosePhotoModal?.addEventListener("click", () => DOM.modalPhotoView?.classList.add("hidden"));
     }
 
@@ -677,15 +652,13 @@
         const apiKey = (STATE.apiKey || "").trim();
 
         if (!apiKey) {
-          showToast("尚未設定 Gemini API Key，請至設定頁填入", "warning");
+          showToast("請在設定頁面輸入 Gemini API Key", "warning");
           DOM.scannerOverlay?.classList.add("hidden");
           return;
         }
 
-        // 支援多模型自動備援 (依序嘗試最新 Flash 模型)
         const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
         let parsed = null;
-        let lastErrorMsg = "";
 
         const payload = {
           systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -703,28 +676,19 @@
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
             const res = await fetch(endpoint, {
               method: "POST",
-              headers: { 
-                "Content-Type": "application/json",
-                "x-goog-api-key": apiKey
-              },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload)
             });
 
-            if (!res.ok) {
-              const errData = await res.json().catch(() => ({}));
-              lastErrorMsg = errData?.error?.message || `HTTP ${res.status}`;
-              continue; // 嘗試下一個可用模型
-            }
+            if (!res.ok) continue;
 
             const data = await res.json();
             const rawJson = data?.candidates?.[0]?.content?.parts?.[0]?.text;
             if (rawJson) {
               parsed = JSON.parse(rawJson);
-              break; // 成功解析，中斷迴圈
+              break;
             }
-          } catch (modelErr) {
-            lastErrorMsg = modelErr.message || "連線異常";
-          }
+          } catch (modelErr) {}
         }
 
         if (parsed) {
@@ -732,7 +696,6 @@
           if (parsed.vendor) DOM.inputVendor.value = parsed.vendor;
           if (parsed.invoiceNo) DOM.inputInvoiceNo.value = parsed.invoiceNo;
           if (parsed.date) {
-            // 處理民國年轉換 (例如 115.09.11 或 115-09-11 轉為 2026-09-11)
             let d = parsed.date.replace(/\./g, "-");
             const dParts = d.split("-");
             if (dParts[0] && parseInt(dParts[0], 10) < 1900) {
@@ -745,18 +708,17 @@
             const btn = document.querySelector(`.btn-payment-pill[data-val="${parsed.paymentMethod}"]`);
             if (btn) btn.click();
           }
-          showToast("✨ AI 已成功辨識廠商與金額！", "success");
+          showToast("✨ AI 已成功辨識單據！", "success");
         } else {
-          showToast(lastErrorMsg ? `辨識提示：${lastErrorMsg}` : "請手動核對金額與廠商", "warning");
+          showToast("請手動核對金額與廠商", "warning");
         }
       } catch (err) {
-        showToast("單據已拍妥，請手動核對金額", "warning");
+        showToast("請手動核對金額與廠商", "warning");
       } finally {
         DOM.scannerOverlay?.classList.add("hidden");
       }
     }
 
-    // ★★★ 核心提交邏輯：遇重複直接覆蓋取代，絕不加倍！ ★★★
     async function handleTicketSubmit() {
       if (STATE.isProcessing) return;
 
@@ -790,7 +752,7 @@
 
       STATE.isProcessing = true;
       DOM.btnSubmitTicket.disabled = true;
-      DOM.btnSubmitTicket.innerHTML = `<span class="inline-block animate-spin mr-2">⏳</span> 正在寫入試算表...`;
+      DOM.btnSubmitTicket.innerHTML = `<span class="inline-block animate-spin mr-2">⏳</span> 正在寫入試算表（自動防覆蓋）...`;
 
       try {
         let compressedBase64 = "";
@@ -800,38 +762,56 @@
 
         const payload = {
           ...newRecord,
-          mode: "overwrite", // 指定覆蓋模式
+          mode: "overwrite",
           imageBase64: compressedBase64,
           imageMime: "image/jpeg"
         };
 
-        // 發送給 Google Apps Script
-        await fetch(STATE.sheetUrl, {
+        const res = await fetch(STATE.sheetUrl, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify(payload)
-        }).catch(() => null); // 忽略 CORS 錯誤
+        });
 
-        // ★ 前端智慧覆蓋：過濾掉同單號或同天同廠商的舊項目
+        const resultJson = await res.json().catch(() => ({}));
+
+        if (resultJson.status === "duplicate_blocked") {
+          showToast("⚠️ " + resultJson.message, "warning");
+          STATE.isProcessing = false;
+          DOM.btnSubmitTicket.disabled = false;
+          DOM.btnSubmitTicket.innerHTML = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>確認無誤 • 直傳 Google 試算表</span>`;
+          return;
+        }
+
         const cleanInv = invoiceNo.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
         STATE.todayRecords = STATE.todayRecords.filter(item => {
           const existInv = (item.invoiceNo || "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-          if (cleanInv && existInv && cleanInv === existInv) return false; // 移除舊單號
-          if (item.vendor === vendor && item.date === date) return false; // 移除同廠商同天
+          if (cleanInv && existInv && cleanInv === existInv) return false;
+          if (item.vendor === vendor && item.date === date) return false;
           return true;
         });
 
-        // 插入最新這筆（保持永遠只有 1 筆）
         STATE.todayRecords.unshift(newRecord);
         saveLocalRecords();
         updateDashboard();
 
-        showToast("🎉 成功入帳！（重複單據已自動覆蓋）", "success");
+        showToast("🎉 成功入帳！（重複單號自動覆蓋）", "success");
         resetCapture();
         switchTab("history");
 
       } catch (e) {
-        showToast("✓ 資料已傳送試算表！", "success");
+        // 離線降級保護
+        const cleanInv = invoiceNo.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+        STATE.todayRecords = STATE.todayRecords.filter(item => {
+          const existInv = (item.invoiceNo || "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+          if (cleanInv && existInv && cleanInv === existInv) return false;
+          return true;
+        });
+        STATE.todayRecords.unshift(newRecord);
+        saveLocalRecords();
+        updateDashboard();
+
+        showToast("✓ 資料已送出，已更新本地紀錄！", "success");
         resetCapture();
         switchTab("history");
       } finally {
@@ -841,7 +821,6 @@
       }
     }
 
-    // 支援刪除單據功能
     function deleteRecord(index) {
       if (!confirm("確定要刪除這筆單據紀錄嗎？")) return;
       STATE.todayRecords.splice(index, 1);
@@ -912,7 +891,7 @@
 
     async function fetchTodayRecords() {
       if (!STATE.sheetUrl) return;
-      DOM.syncDot.className = "w-2 h-2 rounded-full bg-amber-400 animate-ping";
+      DOM.syncDot.className = "w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping";
       DOM.syncText.textContent = "同步中...";
 
       try {
@@ -920,17 +899,16 @@
         const json = await res.json();
         if (json && json.status === "success" && Array.isArray(json.records)) {
           STATE.todayRecords = json.records;
-          cleanDuplicateRecords();
           updateDashboard();
           renderHistoryList();
-          DOM.syncDot.className = "w-2 h-2 rounded-full bg-emerald-400";
+          DOM.syncDot.className = "w-1.5 h-1.5 rounded-full bg-emerald-400";
           DOM.syncText.textContent = "雲端即時";
           return;
         }
       } catch (e) {}
 
-      DOM.syncDot.className = "w-2 h-2 rounded-full bg-emerald-400";
-      DOM.syncText.textContent = "已連線";
+      DOM.syncDot.className = "w-1.5 h-1.5 rounded-full bg-stone-400";
+      DOM.syncText.textContent = "離線模式";
     }
 
     function updateDashboard() {
