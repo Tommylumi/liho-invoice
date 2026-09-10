@@ -4,6 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>里好餐桌 門市進貨系統</title>
+  <!-- App 圖示與全螢幕設定 (支援 iPhone Safari 與 Android Chrome 加入主畫面) -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="里好進貨">
+  <meta name="application-name" content="里好進貨">
+  <meta name="theme-color" content="#9B443B">
+  
+  <!-- 優先讀取您在 GitHub 上傳的圖示，支援 icon.png.JPG / icon.png / IMG_5946.JPG -->
+  <link rel="apple-touch-icon" sizes="180x180" id="appleTouchIcon" href="icon.png.JPG">
+  <link rel="icon" type="image/png" sizes="192x192" id="androidFavicon" href="icon.png.JPG">
+
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -71,8 +82,10 @@
   <header class="bg-liho-red text-white sticky top-0 z-30 shadow-md">
     <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center space-x-2.5">
-        <div class="w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-inner">
-          <span class="text-liho-red font-black text-base">里</span>
+        <!-- 門市專屬 Logo 容器 (若有上傳 icon 則直接顯示圖片，圖片載入失敗時優雅 fallback 為經典里字) -->
+        <div class="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-inner overflow-hidden flex-shrink-0 border border-white/20">
+          <img id="headerBrandLogo" src="icon.png.JPG" alt="里好餐桌" class="w-full h-full object-cover" onerror="this.style.display='none'; document.getElementById('headerFallbackText').style.display='block';">
+          <span id="headerFallbackText" class="text-liho-red font-black text-base hidden">里</span>
         </div>
         <div>
           <h1 class="text-base font-black tracking-tight leading-none">里好餐桌 • 進貨系統</h1>
@@ -679,6 +692,28 @@ function doPost(e) {
     });
 
     function initApp() {
+      // 0. 自動解析專屬連結參數 (?sheetUrl=... & apiKey=...)，讓員工點連結免手動設定
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const paramSheetUrl = urlParams.get("sheetUrl");
+        const paramApiKey = urlParams.get("apiKey");
+
+        if (paramSheetUrl) {
+          STATE.sheetUrl = decodeURIComponent(paramSheetUrl);
+          localStorage.setItem("LIHO_SHEET_URL", STATE.sheetUrl);
+          setTimeout(() => showToast("✓ 門市雲端連線已自動啟用！", "success"), 600);
+        }
+        if (paramApiKey) {
+          STATE.apiKey = decodeURIComponent(paramApiKey);
+          localStorage.setItem("LIHO_API_KEY", STATE.apiKey);
+        }
+      } catch (e) {
+        console.warn("URL 參數解析跳過", e);
+      }
+
+      // 自動檢查並產生里好專屬品牌圖示（磚紅底白字「里」）避免圖示空白
+      setupDefaultBrandIcon();
+
       // 1. 初始化日期
       const now = new Date();
       const dateStr = now.toISOString().split("T")[0];
@@ -1336,6 +1371,71 @@ function doPost(e) {
       document.execCommand("copy");
       document.body.removeChild(tempArea);
       showToast("已成功複製 Apps Script 程式碼！", "success");
+    }
+
+    // 自動生成高解析度里好經典磚紅「里」字 App 圖示（若未上傳 icon.png 時自動生效）
+    function setupDefaultBrandIcon() {
+      // 依序嘗試讀取可能的檔名：icon.png.JPG -> icon.png -> IMG_5946.JPG
+      const candidateIcons = ["icon.png.JPG", "icon.png", "IMG_5946.JPG"];
+      let foundValid = false;
+
+      const tryNextIcon = (idx) => {
+        if (idx >= candidateIcons.length) {
+          // 若皆無，則動態繪製經典磚紅底白字「里」
+          generateFallbackCanvasIcon();
+          return;
+        }
+
+        const testImg = new Image();
+        testImg.onload = () => {
+          const validPath = candidateIcons[idx];
+          const appleIcon = document.getElementById("appleTouchIcon");
+          const androidIcon = document.getElementById("androidFavicon");
+          const headerLogo = document.getElementById("headerBrandLogo");
+          if (appleIcon) appleIcon.href = validPath;
+          if (androidIcon) androidIcon.href = validPath;
+          if (headerLogo) {
+            headerLogo.src = validPath;
+            headerLogo.style.display = "block";
+          }
+        };
+        testImg.onerror = () => tryNextIcon(idx + 1);
+        testImg.src = candidateIcons[idx];
+      };
+
+      tryNextIcon(0);
+
+      function generateFallbackCanvasIcon() {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = 192;
+          canvas.height = 192;
+          const ctx = canvas.getContext("2d");
+
+          ctx.fillStyle = "#9B443B";
+          ctx.beginPath();
+          ctx.roundRect(0, 0, 192, 192, 42);
+          ctx.fill();
+
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.roundRect(10, 10, 172, 172, 34);
+          ctx.stroke();
+
+          ctx.fillStyle = "#FFFFFF";
+          ctx.font = "900 108px system-ui, -apple-system, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("里", 96, 102);
+
+          const iconDataUrl = canvas.toDataURL("image/png");
+          const appleIcon = document.getElementById("appleTouchIcon");
+          const androidIcon = document.getElementById("androidFavicon");
+          if (appleIcon) appleIcon.href = iconDataUrl;
+          if (androidIcon) androidIcon.href = iconDataUrl;
+        } catch (err) {}
+      }
     }
 
     function showToast(msg, type = "info") {
