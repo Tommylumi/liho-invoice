@@ -553,7 +553,6 @@
         for (const model of candidateModels) {
           DOM.scannerSubText.textContent = `AI 正在解析中 (${model})...`;
           try {
-            const isGemini3 = model.startsWith("gemini-3");
             const payload = {
               contents: [{
                 role: "user",
@@ -564,8 +563,7 @@
               }],
               generationConfig: {
                 maxOutputTokens: 2048,
-                responseMimeType: "application/json",
-                ...(isGemini3 ? { thinking_level: "minimal" } : {})
+                responseMimeType: "application/json"
               }
             };
 
