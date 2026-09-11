@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>里好餐桌 • 進貨單據拍照記帳系統</title>
+  <!-- 手機加入主畫面圖示與分頁圖標 -->
+  <link rel="apple-touch-icon" sizes="180x180" href="icon.jpg">
+  <link rel="icon" type="image/jpeg" href="icon.jpg">
+  <link rel="shortcut icon" href="icon.jpg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="里好進貨">
+
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   
@@ -54,9 +62,7 @@
   <header class="bg-brand-600 text-white shadow-md sticky top-0 z-40">
     <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center font-bold text-lg border border-white/20 shadow-inner">
-          里好
-        </div>
+        <img id="brandLogoImg" src="icon.jpg" alt="里好" class="w-10 h-10 rounded-xl object-cover border border-white/20 shadow-md shrink-0" onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 100 100\'><rect width=\'100\' height=\'100\' rx=\'22\' fill=\'%238e362e\'/><text x=\'50%\' y=\'56%\' font-family=\'-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif\' font-weight=\'900\' font-size=\'42\' fill=\'%23ffffff\' dominant-baseline=\'middle\' text-anchor=\'middle\'>里好</text></svg>';">
         <div>
           <h1 class="text-base font-bold tracking-wide">里好餐桌 • 進貨系統</h1>
           <p id="topDateLabel" class="text-xs text-brand-100 flex items-center gap-1">
@@ -225,10 +231,10 @@
             <label class="text-xs font-bold text-stone-700 flex items-center gap-1">
               <i class="fa-solid fa-credit-card text-brand-600"></i> 付款方式
             </label>
-            <div class="grid grid-cols-3 gap-1">
-              <button type="button" class="btn-payment-pill py-2 text-[11px] rounded-lg border border-stone-200 bg-stone-50 text-stone-600 font-medium text-center" data-val="下貨收現">收現</button>
-              <button type="button" class="btn-payment-pill py-2 text-[11px] rounded-lg border border-stone-200 bg-stone-50 text-stone-600 font-medium text-center" data-val="廠商月結">月結</button>
-              <button type="button" class="btn-payment-pill active py-2 text-[11px] rounded-lg border border-brand-600 bg-brand-50 text-brand-700 font-bold text-center" data-val="已匯款">已匯</button>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button type="button" onclick="setPaymentMethod('下貨收現')" class="btn-payment-pill py-2.5 text-xs rounded-xl font-medium text-center border border-stone-200 bg-stone-100 text-stone-600 cursor-pointer active:scale-95 transition-all" data-val="下貨收現">收現</button>
+              <button type="button" onclick="setPaymentMethod('廠商月結')" class="btn-payment-pill py-2.5 text-xs rounded-xl font-medium text-center border border-stone-200 bg-stone-100 text-stone-600 cursor-pointer active:scale-95 transition-all" data-val="廠商月結">月結</button>
+              <button type="button" onclick="setPaymentMethod('已匯款')" class="btn-payment-pill active py-2.5 text-xs rounded-xl font-bold text-center border-2 border-brand-600 bg-brand-600 text-white shadow-sm cursor-pointer active:scale-95 transition-all" data-val="已匯款">已匯</button>
             </div>
             <input type="hidden" id="inputPaymentMethod" value="已匯款">
           </div>
@@ -627,8 +633,7 @@
           }
 
           if (parsed.paymentMethod) {
-            const btn = document.querySelector(`.btn-payment-pill[data-val="${parsed.paymentMethod}"]`);
-            if (btn) btn.click();
+            setPaymentMethod(parsed.paymentMethod);
           }
 
           showToast("✨ AI 已秒速辨識單據！", "success");
@@ -850,7 +855,28 @@
       DOM.inputInvoiceNo.value = "";
       DOM.inputVendor.value = "";
       DOM.inputNotes.value = "";
+      setPaymentMethod("已匯款");
     }
+
+    // 設定與切換付款方式（強化視覺回饋與手機點擊保證）
+    function setPaymentMethod(method) {
+      let targetMethod = "已匯款";
+      if (typeof method === "string") {
+        if (method.includes("收現") || method.includes("現金")) targetMethod = "下貨收現";
+        else if (method.includes("月結")) targetMethod = "廠商月結";
+        else if (method.includes("匯")) targetMethod = "已匯款";
+      }
+      DOM.inputPaymentMethod.value = targetMethod;
+      document.querySelectorAll(".btn-payment-pill").forEach(btn => {
+        const isMatch = btn.dataset.val === targetMethod;
+        if (isMatch) {
+          btn.className = "btn-payment-pill active py-2.5 text-xs rounded-xl font-bold text-center border-2 border-brand-600 bg-brand-600 text-white shadow-sm cursor-pointer active:scale-95 transition-all";
+        } else {
+          btn.className = "btn-payment-pill py-2.5 text-xs rounded-xl font-medium text-center border border-stone-200 bg-stone-100 text-stone-600 cursor-pointer hover:bg-stone-200 active:scale-95 transition-all";
+        }
+      });
+    }
+    window.setPaymentMethod = setPaymentMethod;
 
     // 照片選取或拍攝觸發
     function handleImageFile(file) {
@@ -890,13 +916,9 @@
       if (e.target.classList.contains("vendor-pill")) {
         DOM.inputVendor.value = e.target.textContent.trim();
       }
-      if (e.target.classList.contains("btn-payment-pill")) {
-        document.querySelectorAll(".btn-payment-pill").forEach(b => {
-          b.classList.remove("active", "border-brand-600", "bg-brand-50", "text-brand-700", "font-bold");
-          b.classList.add("border-stone-200", "bg-stone-50", "text-stone-600", "font-medium");
-        });
-        e.target.classList.add("active", "border-brand-600", "bg-brand-50", "text-brand-700", "font-bold");
-        DOM.inputPaymentMethod.value = e.target.dataset.val;
+      const payBtn = e.target.closest(".btn-payment-pill");
+      if (payBtn && payBtn.dataset.val) {
+        setPaymentMethod(payBtn.dataset.val);
       }
       // 檢視照片
       const photoBtn = e.target.closest(".btn-view-photo");
