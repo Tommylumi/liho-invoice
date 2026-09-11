@@ -369,6 +369,9 @@
     // ==========================================
     // 全域狀態與設定 (不硬編碼金鑰，支援網址參數)
     // ==========================================
+    // 徹底清除本機任何舊版失效或過載模型暫存
+    localStorage.removeItem("liho_active_model");
+
     const STATE = {
       apiKey: "",
       sheetUrl: "",
@@ -376,7 +379,7 @@
       currentRotation: 0,
       todayRecords: [],
       pendingDeleteIndex: -1,
-      activeModel: localStorage.getItem("liho_active_model") || "gemini-2.5-flash"
+      activeModel: "gemini-2.5-flash"
     };
 
     // DOM 元素快取
@@ -505,23 +508,24 @@
       });
     }
 
-    // 極速單據辨識：精確鎖定結算總額，絕不發呆輪詢
+    // 極速單據辨識：精確鎖定結算總額，徹底杜絕壅塞別名與長延遲思考
     async function performGeminiOcr(rawBase64) {
       DOM.diagnosticBanner.classList.add("hidden");
       DOM.scannerOverlay.classList.remove("hidden");
-      DOM.scannerSubText.textContent = "AI 高清極速解析中...";
+      DOM.scannerSubText.textContent = "AI 正在極速解析中...";
 
-      const promptText = `你是專業餐飲「里好餐桌」的進貨單審核助理。請仔細辨識這張進貨單/出貨單，嚴格輸出純 JSON：
+      const promptText = `你是專業餐飲「里好餐桌」的進貨單審核助理。請仔細辨識這張進貨單/出貨單，嚴格輸出純 JSON 格式（不要使用 markdown 語法，直接輸出純 JSON）：
 {
-  "vendor": "廠商簡稱 (優先比對：恬芯, 德麥, 美金, 憶霖, 開元, 富盈, 第一饗, 鴻品, 樹森, 有心, Agogo, 好市多, 檸檬先生，無則填單據印製之公司名)",
+  "vendor": "廠商名稱 (例如：恬芯、德麥、美金、開元、憶霖、鴻品...若單據印有公司名請填入)",
   "totalAmount": 2520,
   "date": "YYYY-MM-DD (若單據寫民國年如115-09-11，務必換算為西元年2026-09-11)",
-  "invoiceNo": "單據編號或發票號碼 (例如 SA1150911090 或 FQ09719146，若完全沒有請留空字串)",
+  "invoiceNo": "單據編號或發票號碼 (例如 SA1150911090 或 FQ09719146，若無則留空字串)",
   "paymentMethod": "已匯款 或 下貨收現 或 廠商月結"
 }
 
-【特別注意事項 - 總金額 totalAmount】：
-請務必精準辨識單據右下方或最後結算的【總額】、【合計】或【實付總計】數字（例如：若單據有淨額2400、稅額120、總額2520，請務必抓取最終結算的【總額 2520】！輸出純整數，勿帶文字或符號）。`;
+【特別關鍵指示】：
+1. 總金額 totalAmount：請務必精準抓取單據右下方最終結算的【總額】（例如：若單據有淨額2400、稅額120、總額2520，請抓取【總額 2520】！輸出純整數）。
+2. 若沒有發票號碼或單據編號，invoiceNo 請直接填空字串 ""。`;
 
       try {
         const apiKey = (STATE.apiKey || "").trim();
@@ -531,42 +535,40 @@
           return;
         }
 
-        // 1. 高清無損壓縮（1500px，保留所有小字與表格數字）
+        // 1. 高清壓縮（1500px，保留所有小字與表格數字）
         const fastBase64 = await compressImage(rawBase64, 1500, 0.85);
-        const cleanBase64 = fastBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+        const cleanBase64 = fastBase64.includes(",") ? fastBase64.split(",")[1] : fastBase64;
 
-        // 2. 候選模型清單（首選記憶體中已驗證的模型，秒速直連）
+        // 2. 官方現行穩定模型列表（徹底剔除 gemini-flash-latest 等過載別名）
         const candidateModels = [
-          STATE.activeModel,
           "gemini-2.5-flash",
-          "gemini-3-flash-preview",
+          "gemini-3.6-flash",
           "gemini-2.5-flash-lite",
-          "gemini-flash-latest"
+          "gemini-3.5-flash-lite"
         ];
-        // 去除重複
-        const modelsToTry = [...new Set(candidateModels.filter(Boolean))];
-
-        const payload = {
-          contents: [{
-            role: "user",
-            parts: [
-              { text: promptText },
-              { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 250,
-            responseMimeType: "application/json"
-          }
-        };
 
         let parsed = null;
         let lastErrorText = "";
 
-        // 3. 單次快速發送，失敗立即切換下一隻，絕不延遲發呆
-        for (const model of modelsToTry) {
+        for (const model of candidateModels) {
+          DOM.scannerSubText.textContent = `AI 正在解析中 (${model})...`;
           try {
+            const isGemini3 = model.startsWith("gemini-3");
+            const payload = {
+              contents: [{
+                role: "user",
+                parts: [
+                  { text: promptText },
+                  { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
+                ]
+              }],
+              generationConfig: {
+                maxOutputTokens: 2048,
+                responseMimeType: "application/json",
+                ...(isGemini3 ? { thinking_level: "minimal" } : {})
+              }
+            };
+
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
             const res = await fetch(url, {
               method: "POST",
@@ -580,35 +582,34 @@
             if (!res.ok) {
               const err = await res.json().catch(() => ({}));
               lastErrorText = `[${model}] ${err?.error?.message || `HTTP ${res.status}`}`;
-              continue; // 立即嘗試下一個可用模型
+              continue;
             }
 
             const data = await res.json();
             const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
             
             try {
-              parsed = JSON.parse(rawText);
+              const cleanJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+              parsed = JSON.parse(cleanJson);
             } catch (pErr) {
               const match = rawText.match(/\{[\s\S]*\}/);
               if (match) parsed = JSON.parse(match[0]);
             }
 
             if (parsed) {
-              // 記錄這次成功秒開的模型，往後每次直接用這隻，0 延遲
               STATE.activeModel = model;
-              localStorage.setItem("liho_active_model", model);
               break;
             }
           } catch (e) {
-            lastErrorText = e.message || String(e);
+            lastErrorText = `[${model}] ${e.message || String(e)}`;
           }
         }
 
-        // 4. 填入表單
+        // 3. 解析填入表單
         if (parsed) {
-          // 金額防呆：轉為純數字整數
           if (parsed.totalAmount !== undefined && parsed.totalAmount !== null && parsed.totalAmount !== "") {
-            const num = parseInt(String(parsed.totalAmount).replace(/[^0-9]/g, ""), 10);
+            const cleanAmt = String(parsed.totalAmount).replace(/[^0-9.]/g, "");
+            const num = Math.round(Number(cleanAmt));
             if (!isNaN(num) && num > 0) {
               DOM.inputTotalAmount.value = num;
             }
