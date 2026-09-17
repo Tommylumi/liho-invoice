@@ -218,26 +218,13 @@
           </div>
         </div>
 
-        <!-- 4. 日期與付款方式 -->
-        <div class="grid grid-cols-2 gap-3">
-          <div class="flex flex-col gap-1">
-            <label for="inputDate" class="text-xs font-bold text-stone-700 flex items-center gap-1">
-              <i class="fa-regular fa-calendar text-brand-600"></i> 進貨日期
-            </label>
-            <input type="date" id="inputDate" required
-                   class="w-full px-3 py-2 text-sm bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:outline-none">
-          </div>
-          <div class="flex flex-col gap-1">
-            <label class="text-xs font-bold text-stone-700 flex items-center gap-1">
-              <i class="fa-solid fa-credit-card text-brand-600"></i> 付款方式
-            </label>
-            <div class="grid grid-cols-3 gap-1.5">
-              <button type="button" onclick="setPaymentMethod('下貨收現')" class="btn-payment-pill py-2.5 text-xs rounded-xl font-medium text-center border border-stone-200 bg-stone-100 text-stone-600 cursor-pointer active:scale-95 transition-all" data-val="下貨收現">收現</button>
-              <button type="button" onclick="setPaymentMethod('廠商月結')" class="btn-payment-pill py-2.5 text-xs rounded-xl font-medium text-center border border-stone-200 bg-stone-100 text-stone-600 cursor-pointer active:scale-95 transition-all" data-val="廠商月結">月結</button>
-              <button type="button" onclick="setPaymentMethod('已匯款')" class="btn-payment-pill active py-2.5 text-xs rounded-xl font-bold text-center border-2 border-brand-600 bg-brand-600 text-white shadow-sm cursor-pointer active:scale-95 transition-all" data-val="已匯款">已匯</button>
-            </div>
-            <input type="hidden" id="inputPaymentMethod" value="已匯款">
-          </div>
+        <!-- 4. 進貨日期 (全寬顯示，已移除付款方式) -->
+        <div class="flex flex-col gap-1">
+          <label for="inputDate" class="text-xs font-bold text-stone-700 flex items-center gap-1">
+            <i class="fa-regular fa-calendar text-brand-600"></i> 進貨日期
+          </label>
+          <input type="date" id="inputDate" required
+                 class="w-full px-3.5 py-2.5 text-sm bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:outline-none">
         </div>
 
         <!-- 5. 經手同仁與備註 -->
@@ -418,7 +405,6 @@
       inputInvoiceNo: document.getElementById("inputInvoiceNo"),
       inputVendor: document.getElementById("inputVendor"),
       inputDate: document.getElementById("inputDate"),
-      inputPaymentMethod: document.getElementById("inputPaymentMethod"),
       inputStaff: document.getElementById("inputStaff"),
       inputNotes: document.getElementById("inputNotes"),
       btnSubmitTicket: document.getElementById("btnSubmitTicket"),
@@ -525,8 +511,7 @@
   "vendor": "廠商名稱 (例如：恬芯、德麥、美金、開元、憶霖、鴻品...若單據印有公司名請填入)",
   "totalAmount": 2520,
   "date": "YYYY-MM-DD (若單據寫民國年如115-09-11，務必換算為西元年2026-09-11)",
-  "invoiceNo": "單據編號或發票號碼 (例如 SA1150911090 或 FQ09719146，若無則留空字串)",
-  "paymentMethod": "已匯款 或 下貨收現 或 廠商月結"
+  "invoiceNo": "單據編號或發票號碼 (例如 SA1150911090 或 FQ09719146，若無則留空字串)"
 }
 
 【特別關鍵指示】：
@@ -632,10 +617,6 @@
             if (ym) DOM.targetMonthBadge.textContent = ym;
           }
 
-          if (parsed.paymentMethod) {
-            setPaymentMethod(parsed.paymentMethod);
-          }
-
           showToast("✨ AI 已秒速辨識單據！", "success");
         } else {
           DOM.diagnosticBanner.classList.remove("hidden");
@@ -662,7 +643,6 @@
       const vendor = (DOM.inputVendor.value || "").trim();
       const invoiceNo = (DOM.inputInvoiceNo.value || "").trim();
       const date = DOM.inputDate.value || getTodayIsoDate();
-      const paymentMethod = DOM.inputPaymentMethod.value || "已匯款";
       const staff = DOM.inputStaff.value || "其他";
       const notes = (DOM.inputNotes.value || "").trim();
 
@@ -683,7 +663,6 @@
         vendor: vendor,
         totalAmount: amount,
         invoiceNo: invoiceNo,
-        paymentMethod: paymentMethod,
         staff: staff,
         notes: notes,
         imageBase64: STATE.currentImageData || ""
@@ -718,7 +697,6 @@
           vendor: vendor,
           invoiceNo: invoiceNo,
           totalAmount: amount,
-          paymentMethod: paymentMethod,
           staff: staff,
           notes: notes,
           photoData: STATE.currentImageData || ""
@@ -773,7 +751,6 @@
               <div class="min-w-0 flex flex-col">
                 <div class="flex items-center gap-1.5">
                   <span class="font-bold text-sm text-stone-800 truncate">${item.vendor}</span>
-                  <span class="text-[10px] px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 font-medium">${item.paymentMethod || '已匯'}</span>
                 </div>
                 <div class="text-[11px] text-stone-400 truncate">
                   ${item.timestamp} • 經手：${item.staff || '其他'} ${item.invoiceNo ? `• ${item.invoiceNo}` : ''}
@@ -855,28 +832,7 @@
       DOM.inputInvoiceNo.value = "";
       DOM.inputVendor.value = "";
       DOM.inputNotes.value = "";
-      setPaymentMethod("已匯款");
     }
-
-    // 設定與切換付款方式（強化視覺回饋與手機點擊保證）
-    function setPaymentMethod(method) {
-      let targetMethod = "已匯款";
-      if (typeof method === "string") {
-        if (method.includes("收現") || method.includes("現金")) targetMethod = "下貨收現";
-        else if (method.includes("月結")) targetMethod = "廠商月結";
-        else if (method.includes("匯")) targetMethod = "已匯款";
-      }
-      DOM.inputPaymentMethod.value = targetMethod;
-      document.querySelectorAll(".btn-payment-pill").forEach(btn => {
-        const isMatch = btn.dataset.val === targetMethod;
-        if (isMatch) {
-          btn.className = "btn-payment-pill active py-2.5 text-xs rounded-xl font-bold text-center border-2 border-brand-600 bg-brand-600 text-white shadow-sm cursor-pointer active:scale-95 transition-all";
-        } else {
-          btn.className = "btn-payment-pill py-2.5 text-xs rounded-xl font-medium text-center border border-stone-200 bg-stone-100 text-stone-600 cursor-pointer hover:bg-stone-200 active:scale-95 transition-all";
-        }
-      });
-    }
-    window.setPaymentMethod = setPaymentMethod;
 
     // 照片選取或拍攝觸發
     function handleImageFile(file) {
@@ -915,10 +871,6 @@
     document.addEventListener("click", (e) => {
       if (e.target.classList.contains("vendor-pill")) {
         DOM.inputVendor.value = e.target.textContent.trim();
-      }
-      const payBtn = e.target.closest(".btn-payment-pill");
-      if (payBtn && payBtn.dataset.val) {
-        setPaymentMethod(payBtn.dataset.val);
       }
       // 檢視照片
       const photoBtn = e.target.closest(".btn-view-photo");
