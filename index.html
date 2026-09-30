@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>里好餐桌 • 進貨單據拍照記帳系統</title>
   
-  <!-- 行動裝置全螢幕與圖示配置 -->
   <link rel="apple-touch-icon" sizes="180x180" href="icon.jpg">
   <link rel="icon" type="image/jpeg" href="icon.jpg">
   <link rel="shortcut icon" href="icon.jpg">
@@ -13,7 +12,6 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="里好進貨">
 
-  <!-- Tailwind CSS 與 FontAwesome -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   
@@ -228,7 +226,7 @@
                  class="w-full px-3.5 py-2.5 text-sm bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:outline-none">
         </div>
 
-        <!-- 5. 經手人與品項細項單價備註 -->
+        <!-- 5. 經手人與品項細項備註 -->
         <div class="flex flex-col gap-2 pt-1">
           <div class="flex items-center justify-between">
             <label for="inputStaff" class="text-xs font-bold text-stone-700">經手人</label>
@@ -247,15 +245,13 @@
             <option value="其他" selected>其他</option>
           </select>
 
-          <!-- 進貨品項細項單價分析 (自動換算 $/kg 基準成本) -->
           <div class="flex flex-col gap-1 mt-1">
             <label for="inputNotes" class="text-xs font-bold text-stone-700 flex justify-between items-center">
-              <span>進貨品項細項（AI 單價分析萃取）</span>
+              <span>進貨品項細項（AI 自動萃取）</span>
               <span class="text-[10px] text-emerald-600 font-semibold"><i class="fa-solid fa-bolt"></i> 自動連動食材進價</span>
             </label>
-            <textarea id="inputNotes" rows="3" placeholder="AI 會自動解析：空心菜 10kg ($58/kg) ｜ 青花 5kg ($95/kg) ｜ 紅蘿蔔 15斤 ($45/kg)..."
-                      class="w-full px-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:outline-none leading-relaxed"></textarea>
-            <p class="text-[10px] text-stone-400">※ 單據中的台斤已自動換算為 $/kg 基準單價，直接同步給「食材損耗精算系統」調用！</p>
+            <textarea id="inputNotes" rows="2" placeholder="AI 會自動解析：空心菜 10kg ($58/kg) ｜ 雞胸肉 30kg ($165/kg)..."
+                      class="w-full px-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:outline-none"></textarea>
           </div>
         </div>
 
@@ -379,7 +375,7 @@
       currentRotation: 0,
       todayRecords: [],
       pendingDeleteIndex: -1,
-      parsedItems: [] // 暫存解析出的食材單價細項清單
+      parsedItems: [] // 暫存解析出的食材細項
     };
 
     const DOM = {
@@ -467,7 +463,7 @@
       DOM.inputStaff.value = name;
     }
 
-    async function compressImage(base64Src, maxDim = 1500, quality = 0.85) {
+    async function compressImage(base64Src, maxDim = 1000, quality = 0.78) {
       return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -494,50 +490,28 @@
       });
     }
 
-    // 【核心升級：Gemini 3.8/3.6/2.5 全品項食材細項單價分析】
+    // 【極速 AI 辨識引擎：直連 Google 指定主力模型、極速 1~2 秒回傳】
     async function performGeminiOcr(rawBase64) {
       DOM.diagnosticBanner.classList.add("hidden");
       DOM.scannerOverlay.classList.remove("hidden");
-      DOM.scannerSubText.textContent = "AI 正在極速解析單據與食材單價...";
+      DOM.scannerSubText.textContent = "AI 正在極速解析單據與細項...";
 
-      const promptText = `你現在是【里好餐桌】門市進貨智慧解析系統。請仔細辨識此張進貨單/送貨簽單/發票照片，並回傳純 JSON 格式，禁止任何 Markdown 語法或多餘廢話。
-
-【解析規則】：
-1. vendor (廠商名稱)：
-   - 請優先對齊門市常態廠商：富盈、第一饗、鴻品、凱燁、樹森、有心、Agogo、美金、三佳、恬芯、德麥、憶霖、鼎鎂、源品、潞運、麻辣、好市多、開元、檸檬先生、親民、初心安、綠園。若非上述廠商請如實擷取抬頭。
-2. date (進貨日期)：
-   - 格式必須為 YYYY-MM-DD。若為民國年（如 115-09-30）請自動轉換為西元年 2026-09-30。
-3. invoiceNo (單號/發票)：
-   - 擷取出貨單號或發票字軌號碼，若無則回傳空字串 ""。
-4. totalAmount (結算總金額)：
-   - 單據右下角的應付總額/含稅總額（整數或小數），務必精準核對。
-5. items (品項細項清單) - 【關鍵】：
-   - 請完整擷取單據中的每一項物料（涵蓋蔬菜、肉品、海鮮、蛋、米、調味加工品、包材耗材）。
-   - 每一項包含：
-     * name: 食材品名（去除代號，如：空心菜、雞胸肉、牛五花、洗選蛋、沙拉醬、外帶餐盒）
-     * qty: 數量（數字）
-     * unit: 單位（kg、斤、包、箱、顆、條、盒）
-     * unitPrice: 原單價（數字）
-     * unitCostKg: 換算每公斤基準成本（$/kg）。若為台斤請除以 0.6；若為包/顆/瓶請換算為單件基準成本
-     * subtotal: 該項小計金額
-6. itemsSummary (細項摘要字串)：
-   - 請組裝成一段清爽明瞭的文字，格式範例：
-     "空心菜 10kg ($58/kg) ｜ 青花 5kg ($95/kg) ｜ 紅蘿蔔 15斤 ($45/kg)"
-     或 "雞胸肉 30kg ($165/kg) ｜ 雞腿肉 10kg ($180/kg)"
-
-【回傳 JSON 格式範例】：
+      // 精簡極速提示詞：直擊核心，大幅降低 Token 消耗與生成等待
+      const promptText = `你是里好餐桌進貨解析系統。請辨識單據並直接回傳純 JSON（嚴禁 markdown）：
 {
-  "vendor": "富盈蔬菜",
-  "date": "2026-09-30",
-  "invoiceNo": "20260930001",
+  "vendor": "廠商名稱(如富盈、第一饗、鴻品、凱燁、樹森、有心、Agogo、美金、三佳、恬芯、德麥、憶霖、鼎鎂、源品、好市多、開元、檸檬先生)",
+  "date": "YYYY-MM-DD(民國轉西元)",
+  "invoiceNo": "單號或發票(無則留空字串)",
   "totalAmount": 1850,
   "items": [
-    { "name": "空心菜", "qty": 10, "unit": "kg", "unitPrice": 58, "unitCostKg": 58, "subtotal": 580 },
-    { "name": "青花", "qty": 5, "unit": "kg", "unitPrice": 95, "unitCostKg": 95, "subtotal": 475 },
-    { "name": "紅蘿蔔", "qty": 15, "unit": "台斤", "unitPrice": 27, "unitCostKg": 45, "subtotal": 405 }
+    { "name": "品名", "qty": 10, "unit": "kg", "unitPrice": 58, "unitCostKg": 58, "subtotal": 580 }
   ],
-  "itemsSummary": "空心菜 10kg ($58/kg) ｜ 青花 5kg ($95/kg) ｜ 紅蘿蔔 15斤 ($45/kg)"
-}`;
+  "itemsSummary": "空心菜 10kg ($58/kg) ｜ 青花 5kg ($95/kg)"
+}
+【關鍵】：
+1. totalAmount 必抓右下角含稅應付總額（純整數/浮點數）。
+2. unitCostKg 若為台斤請除以0.6換算$/kg。
+3. itemsSummary 組成一行精簡摘要。`;
 
       try {
         const apiKey = (STATE.apiKey || "").trim();
@@ -547,16 +521,16 @@
           return;
         }
 
-        const fastBase64 = await compressImage(rawBase64, 1500, 0.85);
+        // 1. 極速壓縮至約 80KB (4G 上傳只要 0.1 秒)
+        const fastBase64 = await compressImage(rawBase64, 1000, 0.78);
         const cleanBase64 = fastBase64.includes(",") ? fastBase64.split(",")[1] : fastBase64;
 
-        // 全面採用 Google 官方最新指定的端點
-        const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-2.5-flash"];
+        // 2. 徹底移除 gemini-2.5-flash，嚴格鎖定 Google 官方指定現行旗艦
+        const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
         let parsed = null;
         let lastErrorText = "";
 
         for (const model of candidateModels) {
-          DOM.scannerSubText.textContent = `AI 正在解析中 (${model})...`;
           try {
             const payload = {
               contents: [{
@@ -567,7 +541,7 @@
                 ]
               }],
               generationConfig: {
-                maxOutputTokens: 2048,
+                maxOutputTokens: 1024,
                 responseMimeType: "application/json"
               }
             };
@@ -585,6 +559,7 @@
             if (!res.ok) {
               const err = await res.json().catch(() => ({}));
               lastErrorText = `[${model}] ${err?.error?.message || `HTTP ${res.status}`}`;
+              // 遇到錯誤或壅塞，不等待，立刻切換下一模型！
               continue;
             }
 
@@ -631,7 +606,7 @@
           }
           STATE.parsedItems = parsed.items || [];
 
-          showToast("✨ AI 已辨識單據與食材細項單價！", "success");
+          showToast("✨ AI 已秒速辨識單據與食材細項！", "success");
         } else {
           DOM.diagnosticBanner.classList.remove("hidden");
           DOM.diagnosticTitle.textContent = "AI 辨識未完成";
