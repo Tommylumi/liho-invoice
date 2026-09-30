@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>里好餐桌 • 進貨單據拍照記帳系統</title>
   
+  <!-- 行動裝置全螢幕與圖示配置 -->
   <link rel="apple-touch-icon" sizes="180x180" href="icon.jpg">
   <link rel="icon" type="image/jpeg" href="icon.jpg">
   <link rel="shortcut icon" href="icon.jpg">
@@ -12,6 +13,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="里好進貨">
 
+  <!-- Tailwind CSS 與 FontAwesome -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   
@@ -226,7 +228,7 @@
                  class="w-full px-3.5 py-2.5 text-sm bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:outline-none">
         </div>
 
-        <!-- 5. 經手人與品項細項備註 -->
+        <!-- 5. 經手人與品項細項單價備註 -->
         <div class="flex flex-col gap-2 pt-1">
           <div class="flex items-center justify-between">
             <label for="inputStaff" class="text-xs font-bold text-stone-700">經手人</label>
@@ -245,13 +247,15 @@
             <option value="其他" selected>其他</option>
           </select>
 
+          <!-- 進貨品項細項單價分析 (自動換算 $/kg 基準成本) -->
           <div class="flex flex-col gap-1 mt-1">
             <label for="inputNotes" class="text-xs font-bold text-stone-700 flex justify-between items-center">
-              <span>進貨品項細項（AI 自動萃取）</span>
+              <span>進貨品項細項（AI 單價分析萃取）</span>
               <span class="text-[10px] text-emerald-600 font-semibold"><i class="fa-solid fa-bolt"></i> 自動連動食材進價</span>
             </label>
-            <textarea id="inputNotes" rows="2" placeholder="AI 會自動解析：空心菜 10kg ($58/kg) ｜ 雞胸肉 30kg ($165/kg)..."
-                      class="w-full px-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:outline-none"></textarea>
+            <textarea id="inputNotes" rows="3" placeholder="AI 會自動解析：空心菜 10kg ($58/kg) ｜ 青花 5kg ($95/kg) ｜ 紅蘿蔔 15斤 ($45/kg)..."
+                      class="w-full px-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:outline-none leading-relaxed"></textarea>
+            <p class="text-[10px] text-stone-400">※ 單據中的台斤已自動換算為 $/kg 基準單價，直接同步給「食材損耗精算系統」調用！</p>
           </div>
         </div>
 
@@ -375,7 +379,7 @@
       currentRotation: 0,
       todayRecords: [],
       pendingDeleteIndex: -1,
-      parsedItems: [] // 暫存解析出的食材細項
+      parsedItems: [] // 暫存解析出的食材單價細項清單
     };
 
     const DOM = {
@@ -490,7 +494,7 @@
       });
     }
 
-    // 【核心升級：Gemini 全品項細項萃取】
+    // 【核心升級：Gemini 3.8/3.6/2.5 全品項食材細項單價分析】
     async function performGeminiOcr(rawBase64) {
       DOM.diagnosticBanner.classList.add("hidden");
       DOM.scannerOverlay.classList.remove("hidden");
@@ -546,7 +550,8 @@
         const fastBase64 = await compressImage(rawBase64, 1500, 0.85);
         const cleanBase64 = fastBase64.includes(",") ? fastBase64.split(",")[1] : fastBase64;
 
-        const candidateModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
+        // 全面採用 Google 官方最新指定的端點
+        const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-2.5-flash"];
         let parsed = null;
         let lastErrorText = "";
 
@@ -626,7 +631,7 @@
           }
           STATE.parsedItems = parsed.items || [];
 
-          showToast("✨ AI 已辨識單據與食材細項！", "success");
+          showToast("✨ AI 已辨識單據與食材細項單價！", "success");
         } else {
           DOM.diagnosticBanner.classList.remove("hidden");
           DOM.diagnosticTitle.textContent = "AI 辨識未完成";
