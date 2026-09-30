@@ -550,8 +550,8 @@
         const fastBase64 = await compressImage(rawBase64, 1500, 0.85);
         const cleanBase64 = fastBase64.includes(",") ? fastBase64.split(",")[1] : fastBase64;
 
-        // 全面鎖定 Google 官方指定最新旗艦模型（徹底移除已除役的 2.5 與 2.0 模型）
-        const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
+        // 全面採用 Google 官方最新指定的端點
+        const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-2.5-flash"];
         let parsed = null;
         let lastErrorText = "";
 
@@ -922,11 +922,6 @@
     });
 
     function loadInitialSettings() {
-      // 自動清除舊版模型暫存，強制對齊 Google 最新 3.8 引擎
-      try {
-        localStorage.removeItem("liho_active_model");
-      } catch (e) {}
-
       const params = new URLSearchParams(window.location.search);
       const urlKey = params.get("apiKey");
       const urlSheet = params.get("sheetUrl");
