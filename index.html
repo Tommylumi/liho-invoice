@@ -140,6 +140,25 @@
         </div>
       </div>
 
+      <!-- 額度冷卻倒數提示條（429 專用） -->
+      <div id="rateLimitCountdownBox" class="hidden bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 text-xs text-amber-900 flex flex-col gap-2 shadow-sm animate-pulse">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2 font-bold text-sm text-amber-800">
+            <i class="fa-solid fa-hourglass-half text-amber-600 animate-spin"></i>
+            <span>Google 免費額度冷卻中</span>
+          </div>
+          <span class="px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-800 font-mono font-bold text-xs">
+            剩餘 <span id="rateLimitSeconds">55</span> 秒
+          </span>
+        </div>
+        <p class="text-[12px] text-amber-800/90 leading-relaxed">
+          門市短時間內連續測試已達免費每分鐘上限。<strong>請稍候，倒數結束後系統將自動為您完成辨識</strong>，無需重新拍照！
+        </p>
+        <div class="w-full bg-amber-200 rounded-full h-1.5 overflow-hidden mt-1">
+          <div id="rateLimitBar" class="bg-amber-600 h-full w-full transition-all duration-1000"></div>
+        </div>
+      </div>
+
       <!-- 錯誤提示條 -->
       <div id="diagnosticBanner" class="hidden bg-red-50 border border-red-200 rounded-xl p-3.5 text-xs text-red-700 flex flex-col gap-2">
         <div class="flex items-center justify-between">
@@ -152,10 +171,6 @@
           </button>
         </div>
         <p id="diagnosticMsg" class="text-[11px] text-red-600/90 font-mono break-all"></p>
-        <div id="rateLimitCountdownBox" class="hidden flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2 text-amber-800 text-[11px]">
-          <i class="fa-solid fa-hourglass-half animate-spin text-amber-600"></i>
-          <span>免費額度頻率冷卻中，將在 <strong id="rateLimitSeconds" class="font-bold text-amber-700">15</strong> 秒後自動完成辨識...</span>
-        </div>
       </div>
 
       <!-- 填報確認表單 -->
@@ -167,7 +182,7 @@
             <span class="font-bold text-sm text-stone-800">進貨單核對卡</span>
           </div>
           <span id="targetMonthBadge" class="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-stone-100 text-stone-600">
-            202609
+            202610
           </span>
         </div>
 
@@ -209,6 +224,7 @@
                  class="w-full px-3.5 py-2.5 text-sm font-semibold text-stone-800 bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:ring-1 focus:ring-brand-600 focus:outline-none">
           
           <div class="flex flex-wrap gap-1.5 pt-1 max-h-24 overflow-y-auto custom-scrollbar">
+            <button type="button" class="vendor-pill px-2.5 py-1 text-xs rounded-lg bg-stone-100 hover:bg-brand-50 hover:text-brand-600 text-stone-700 font-medium transition-colors">富益</button>
             <button type="button" class="vendor-pill px-2.5 py-1 text-xs rounded-lg bg-stone-100 hover:bg-brand-50 hover:text-brand-600 text-stone-700 font-medium transition-colors">恬芯</button>
             <button type="button" class="vendor-pill px-2.5 py-1 text-xs rounded-lg bg-stone-100 hover:bg-brand-50 hover:text-brand-600 text-stone-700 font-medium transition-colors">富盈</button>
             <button type="button" class="vendor-pill px-2.5 py-1 text-xs rounded-lg bg-stone-100 hover:bg-brand-50 hover:text-brand-600 text-stone-700 font-medium transition-colors">德麥</button>
@@ -259,7 +275,7 @@
               <span>進貨品項細項（AI 自動萃取）</span>
               <span class="text-[10px] text-emerald-600 font-semibold"><i class="fa-solid fa-bolt"></i> 自動連動食材進價</span>
             </label>
-            <textarea id="inputNotes" rows="2" placeholder="AI 會自動解析：空心菜 10kg ($58/kg) ｜ 雞胸肉 30kg ($165/kg)..."
+            <textarea id="inputNotes" rows="2" placeholder="AI 會自動解析：青江菜 15斤 ($20/斤) ｜ 青花菜 1件 ($600)..."
                       class="w-full px-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:outline-none"></textarea>
           </div>
         </div>
@@ -374,7 +390,6 @@
   </div>
 
   <script>
-    // 預設後端 Web App 網址
     const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbzdlLHGpB5gdXgitXSM6pifJR07WCFqYMIoKOrJQ81XjZpePvMAGCRgsrm1m_3YDlWl/exec";
 
     const STATE = {
@@ -384,7 +399,8 @@
       currentRotation: 0,
       todayRecords: [],
       pendingDeleteIndex: -1,
-      parsedItems: [] // 暫存解析出的食材細項
+      parsedItems: [],
+      isCoolingDown: false
     };
 
     const DOM = {
@@ -409,6 +425,7 @@
       diagnosticMsg: document.getElementById("diagnosticMsg"),
       rateLimitCountdownBox: document.getElementById("rateLimitCountdownBox"),
       rateLimitSeconds: document.getElementById("rateLimitSeconds"),
+      rateLimitBar: document.getElementById("rateLimitBar"),
       entryForm: document.getElementById("entryForm"),
       inputTotalAmount: document.getElementById("inputTotalAmount"),
       inputInvoiceNo: document.getElementById("inputInvoiceNo"),
@@ -478,7 +495,7 @@
       if (DOM.inputStaff) DOM.inputStaff.value = name;
     }
 
-    async function compressImage(base64Src, maxDim = 1200, quality = 0.8) {
+    async function compressImage(base64Src, maxDim = 1000, quality = 0.78) {
       return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -505,38 +522,47 @@
       });
     }
 
-    // 【極速 AI 辨識引擎：支援 429 額度冷卻倒數、6 秒超時熔斷、無延遲即時切換】
-    let countdownTimer = null;
+    // 【智慧 429 額度冷卻倒數與自動續跑】
+    let countdownInterval = null;
 
-    function startRateLimitCountdown(seconds, callback) {
-      if (countdownTimer) clearInterval(countdownTimer);
-      let remaining = Math.max(1, Math.ceil(seconds));
+    function triggerRateLimitCooldown(seconds, callback) {
+      if (countdownInterval) clearInterval(countdownInterval);
+      STATE.isCoolingDown = true;
+      let remaining = Math.max(2, Math.ceil(seconds));
+      const totalSeconds = remaining;
+
       DOM.rateLimitCountdownBox.classList.remove("hidden");
       DOM.rateLimitSeconds.textContent = remaining;
+      DOM.rateLimitBar.style.width = "100%";
 
-      countdownTimer = setInterval(() => {
+      countdownInterval = setInterval(() => {
         remaining--;
         DOM.rateLimitSeconds.textContent = remaining;
+        const pct = Math.max(0, Math.round((remaining / totalSeconds) * 100));
+        DOM.rateLimitBar.style.width = `${pct}%`;
+
         if (remaining <= 0) {
-          clearInterval(countdownTimer);
-          countdownTimer = null;
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+          STATE.isCoolingDown = false;
           DOM.rateLimitCountdownBox.classList.add("hidden");
+          showToast("✨ 頻率已解鎖，立即為您完成辨識！", "success");
           if (typeof callback === "function") callback();
         }
       }, 1000);
     }
 
+    // 【核心 AI 辨識引擎：自動避開過載與頻率保護】
     async function performGeminiOcr(rawBase64) {
-      if (countdownTimer) {
-        clearInterval(countdownTimer);
-        countdownTimer = null;
+      if (STATE.isCoolingDown) {
+        showToast("冷卻倒數中，請稍候自動辨識...", "warning");
+        return;
       }
-      DOM.rateLimitCountdownBox.classList.add("hidden");
+
       DOM.diagnosticBanner.classList.add("hidden");
       DOM.scannerOverlay.classList.remove("hidden");
       DOM.scannerSubText.textContent = "AI 正在極速解析單據與細項...";
 
-      // 精簡直擊核心提示詞
       const promptText = `你是里好餐桌進貨解析系統。請辨識單據並直接回傳純 JSON（嚴禁 markdown）：
 {
   "vendor": "廠商名稱(如富益、富盈、第一饗、鴻品、凱燁、樹森、有心、Agogo、美金、三佳、恬芯、德麥、憶霖、鼎鎂、源品、好市多、開元、檸檬先生)",
@@ -546,7 +572,7 @@
   "items": [
     { "name": "品名", "qty": 10, "unit": "kg", "unitPrice": 58, "unitCostKg": 58, "subtotal": 580 }
   ],
-  "itemsSummary": "青江菜 15斤 ($33/kg) ｜ 青花菜 1件 ($600) ｜ 洋蔥 4斤10兩"
+  "itemsSummary": "青江菜 15斤 ($20/斤) ｜ 青花菜 1件 ($600) ｜ 洋蔥 4斤10兩"
 }
 【關鍵】：
 1. totalAmount 必抓右下角含稅/未清應付總額（純整數/浮點數）。
@@ -561,21 +587,20 @@
           return;
         }
 
-        // 1. 輕量快速壓縮（約 70KB，傳輸只需 0.08 秒）
         const fastBase64 = await compressImage(rawBase64, 1000, 0.78);
         const cleanBase64 = fastBase64.includes(",") ? fastBase64.split(",")[1] : fastBase64;
 
-        // 2. 候選模型列表：優先直攻最新正式旗艦 gemini-3.8-flash，備援 gemini-3.6-flash
+        // 優先直攻官方最新 gemini-3.8-flash；遇到限流則智慧排隊
         const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
         let parsed = null;
         let lastErrorText = "";
-        let retryAfterSeconds = 0;
+        let rateLimitWaitSeconds = 0;
 
         for (const model of candidateModels) {
           DOM.scannerSubText.textContent = `AI 正在極速解析單據 (${model})...`;
 
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 6500);
+          const timeoutId = setTimeout(() => controller.abort(), 7000);
 
           try {
             const payload = {
@@ -610,15 +635,14 @@
               const msg = err?.error?.message || `HTTP ${res.status}`;
               lastErrorText = `[${model}] ${msg}`;
 
-              // 檢查是否遇到 429 額度超限
+              // 檢查 429 額度超限
               if (res.status === 429 || msg.includes("Quota exceeded") || msg.includes("rate-limits")) {
                 const matchWait = msg.match(/retry in ([0-9.]+)s/i);
-                retryAfterSeconds = matchWait ? Math.ceil(parseFloat(matchWait[1])) : 15;
-                // 若額度受限，不必連打下一隻模型浪費請求，直接倒數重試！
+                rateLimitWaitSeconds = matchWait ? Math.ceil(parseFloat(matchWait[1])) : 20;
+                // 一旦觸發每分鐘限額，立刻中斷並啟動倒數，不再繼續發送請求消耗額度
                 break;
               }
 
-              // 遇到 503 壅塞，切換下一台
               continue;
             }
 
@@ -637,7 +661,7 @@
           } catch (e) {
             clearTimeout(timeoutId);
             const isTimeout = e.name === "AbortError";
-            lastErrorText = isTimeout ? `[${model}] 連線逾時(已自動換線)` : `[${model}] ${e.message || String(e)}`;
+            lastErrorText = isTimeout ? `[${model}] 連線逾時 (已自動切換備援)` : `[${model}] ${e.message || String(e)}`;
           }
         }
 
@@ -666,20 +690,18 @@
           }
           STATE.parsedItems = parsed.items || [];
 
-          showToast("✨ AI 已秒速辨識單據與食材細項！", "success");
+          showToast("✨ AI 已辨識單據與食材細項！", "success");
         } else {
-          DOM.diagnosticBanner.classList.remove("hidden");
-          DOM.diagnosticTitle.textContent = retryAfterSeconds > 0 ? "Google 免費額度冷卻中" : "AI 辨識未完成";
-          DOM.diagnosticMsg.textContent = lastErrorText || "伺服器忙碌，請點擊右上方重新辨識，或直接手動確認金額。";
-          
-          if (retryAfterSeconds > 0) {
-            startRateLimitCountdown(retryAfterSeconds, () => {
-              if (STATE.currentImageData) {
-                performGeminiOcr(STATE.currentImageData);
-              }
+          if (rateLimitWaitSeconds > 0) {
+            triggerRateLimitCooldown(rateLimitWaitSeconds, () => {
+              if (STATE.currentImageData) performGeminiOcr(STATE.currentImageData);
             });
+          } else {
+            DOM.diagnosticBanner.classList.remove("hidden");
+            DOM.diagnosticTitle.textContent = "AI 辨識未完成";
+            DOM.diagnosticMsg.textContent = lastErrorText || "伺服器忙碌，請點擊上方按鈕重試。";
+            showToast("辨識未完成，請見畫面提示", "warning");
           }
-          showToast(retryAfterSeconds > 0 ? `額度冷卻中，${retryAfterSeconds}秒後自動重試` : "辨識未完成，請見畫面提示", "warning");
         }
 
       } catch (err) {
@@ -723,7 +745,7 @@
         staff: staff,
         notes: notes,
         itemsSummary: notes,
-        items: STATE.parsedItems, // 傳送結構化食材細項供後端更新菜價
+        items: STATE.parsedItems,
         imageBase64: STATE.currentImageData || ""
       };
 
@@ -913,7 +935,6 @@
     DOM.btnRetake.addEventListener("click", resetFormAndCapture);
     DOM.entryForm.addEventListener("submit", handleTicketSubmit);
 
-    // 一鍵重新辨識按鈕
     const btnRetryOcr = document.getElementById("btnRetryOcr");
     if (btnRetryOcr) {
       btnRetryOcr.addEventListener("click", () => {
