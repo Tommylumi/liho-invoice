@@ -141,10 +141,15 @@
       </div>
 
       <!-- 錯誤提示條 -->
-      <div id="diagnosticBanner" class="hidden bg-red-50 border border-red-200 rounded-xl p-3.5 text-xs text-red-700 flex flex-col gap-1">
-        <div class="flex items-center gap-1.5 font-bold">
-          <i class="fa-solid fa-circle-exclamation text-red-600"></i>
-          <span id="diagnosticTitle">辨識連線診斷</span>
+      <div id="diagnosticBanner" class="hidden bg-red-50 border border-red-200 rounded-xl p-3.5 text-xs text-red-700 flex flex-col gap-2">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-1.5 font-bold">
+            <i class="fa-solid fa-circle-exclamation text-red-600"></i>
+            <span id="diagnosticTitle">辨識連線診斷</span>
+          </div>
+          <button type="button" id="btnRetryOcr" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-[11px] flex items-center gap-1 shadow-xs active:scale-95 transition-all">
+            <i class="fa-solid fa-rotate-right"></i> 立即重新辨識
+          </button>
         </div>
         <p id="diagnosticMsg" class="text-[11px] text-red-600/90 font-mono break-all"></p>
       </div>
@@ -490,26 +495,26 @@
       });
     }
 
-    // 【極速 AI 辨識引擎：直連 Google 指定主力模型、極速 1~2 秒回傳】
+    // 【極速 AI 辨識引擎：直連 Google 指定主力模型、具備 503 壅塞自動避讓重試】
     async function performGeminiOcr(rawBase64) {
       DOM.diagnosticBanner.classList.add("hidden");
       DOM.scannerOverlay.classList.remove("hidden");
       DOM.scannerSubText.textContent = "AI 正在極速解析單據與細項...";
 
-      // 精簡極速提示詞：直擊核心，大幅降低 Token 消耗與生成等待
+      // 精簡極速提示詞
       const promptText = `你是里好餐桌進貨解析系統。請辨識單據並直接回傳純 JSON（嚴禁 markdown）：
 {
-  "vendor": "廠商名稱(如富盈、第一饗、鴻品、凱燁、樹森、有心、Agogo、美金、三佳、恬芯、德麥、憶霖、鼎鎂、源品、好市多、開元、檸檬先生)",
+  "vendor": "廠商名稱(如富益、富盈、第一饗、鴻品、凱燁、樹森、有心、Agogo、美金、三佳、恬芯、德麥、憶霖、鼎鎂、源品、好市多、開元、檸檬先生)",
   "date": "YYYY-MM-DD(民國轉西元)",
   "invoiceNo": "單號或發票(無則留空字串)",
-  "totalAmount": 1850,
+  "totalAmount": 1011,
   "items": [
     { "name": "品名", "qty": 10, "unit": "kg", "unitPrice": 58, "unitCostKg": 58, "subtotal": 580 }
   ],
-  "itemsSummary": "空心菜 10kg ($58/kg) ｜ 青花 5kg ($95/kg)"
+  "itemsSummary": "青江菜 15斤 ($33/kg) ｜ 青花菜 1件 ($600) ｜ 洋蔥 4斤10兩"
 }
 【關鍵】：
-1. totalAmount 必抓右下角含稅應付總額（純整數/浮點數）。
+1. totalAmount 必抓右下角含稅/未清應付總額（純整數/浮點數）。
 2. unitCostKg 若為台斤請除以0.6換算$/kg。
 3. itemsSummary 組成一行精簡摘要。`;
 
@@ -521,63 +526,86 @@
           return;
         }
 
-        // 1. 極速壓縮至約 80KB (4G 上傳只要 0.1 秒)
+        // 1. 極速壓縮至約 80KB (4G 上傳只需 0.1 秒)
         const fastBase64 = await compressImage(rawBase64, 1000, 0.78);
         const cleanBase64 = fastBase64.includes(",") ? fastBase64.split(",")[1] : fastBase64;
 
-        // 2. 徹底移除 gemini-2.5-flash，嚴格鎖定 Google 官方指定現行旗艦
-        const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
+        // 2. 候選模型列表
+        const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3-flash"];
         let parsed = null;
         let lastErrorText = "";
 
+        // 智慧型發送與 503 壅塞退避重試
         for (const model of candidateModels) {
-          try {
-            const payload = {
-              contents: [{
-                role: "user",
-                parts: [
-                  { text: promptText },
-                  { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
-                ]
-              }],
-              generationConfig: {
-                maxOutputTokens: 1024,
-                responseMimeType: "application/json"
-              }
-            };
+          let retryCount = 0;
+          const maxRetries = 2; // 若遇 503 繁忙自動重試 2 次
 
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const res = await fetch(url, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": apiKey
-              },
-              body: JSON.stringify(payload)
-            });
-
-            if (!res.ok) {
-              const err = await res.json().catch(() => ({}));
-              lastErrorText = `[${model}] ${err?.error?.message || `HTTP ${res.status}`}`;
-              // 遇到錯誤或壅塞，不等待，立刻切換下一模型！
-              continue;
-            }
-
-            const data = await res.json();
-            const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-            
+          while (retryCount <= maxRetries) {
             try {
-              const cleanJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-              parsed = JSON.parse(cleanJson);
-            } catch (pErr) {
-              const match = rawText.match(/\{[\s\S]*\}/);
-              if (match) parsed = JSON.parse(match[0]);
-            }
+              if (retryCount > 0) {
+                DOM.scannerSubText.textContent = `伺服器短暫繁忙，正在自動重試 (${model} 第 ${retryCount} 次)...`;
+                await new Promise((r) => setTimeout(r, 1200 * retryCount)); // 等待 1.2 秒避讓高峰
+              } else {
+                DOM.scannerSubText.textContent = `AI 正在極速解析單據 (${model})...`;
+              }
 
-            if (parsed) break;
-          } catch (e) {
-            lastErrorText = `[${model}] ${e.message || String(e)}`;
+              const payload = {
+                contents: [{
+                  role: "user",
+                  parts: [
+                    { text: promptText },
+                    { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
+                  ]
+                }],
+                generationConfig: {
+                  maxOutputTokens: 1024,
+                  responseMimeType: "application/json"
+                }
+              };
+
+              const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+              const res = await fetch(url, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-goog-api-key": apiKey
+                },
+                body: JSON.stringify(payload)
+              });
+
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                const errMsg = err?.error?.message || `HTTP ${res.status}`;
+                lastErrorText = `[${model}] ${errMsg}`;
+
+                // 若為 503 High demand 或 429 暫時壅塞，進入重試
+                if (res.status === 503 || errMsg.includes("high demand") || errMsg.includes("overloaded")) {
+                  retryCount++;
+                  continue;
+                }
+                // 若為其他錯誤直接換下一隻模型
+                break;
+              }
+
+              const data = await res.json();
+              const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+              
+              try {
+                const cleanJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+                parsed = JSON.parse(cleanJson);
+              } catch (pErr) {
+                const match = rawText.match(/\{[\s\S]*\}/);
+                if (match) parsed = JSON.parse(match[0]);
+              }
+
+              if (parsed) break; // 成功解析立即跳出
+            } catch (e) {
+              lastErrorText = `[${model}] ${e.message || String(e)}`;
+              retryCount++;
+            }
           }
+
+          if (parsed) break; // 已成功解析，跳出模型循環
         }
 
         if (parsed) {
@@ -844,6 +872,18 @@
 
     DOM.btnRetake.addEventListener("click", resetFormAndCapture);
     DOM.entryForm.addEventListener("submit", handleTicketSubmit);
+
+    // 一鍵重新辨識按鈕
+    const btnRetryOcr = document.getElementById("btnRetryOcr");
+    if (btnRetryOcr) {
+      btnRetryOcr.addEventListener("click", () => {
+        if (STATE.currentImageData) {
+          performGeminiOcr(STATE.currentImageData);
+        } else {
+          showToast("尚未選取照片，請重新拍照", "warning");
+        }
+      });
+    }
 
     document.addEventListener("click", (e) => {
       if (e.target.classList.contains("vendor-pill")) {
