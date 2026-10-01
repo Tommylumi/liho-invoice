@@ -141,20 +141,20 @@
       </div>
 
       <!-- 額度冷卻倒數提示條（429 專用） -->
-      <div id="rateLimitCountdownBox" class="hidden bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 text-xs text-amber-900 flex flex-col gap-2 shadow-sm animate-pulse">
+      <div id="rateLimitCountdownBox" class="hidden bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 text-xs text-amber-900 flex flex-col gap-2 shadow-sm">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2 font-bold text-sm text-amber-800">
-            <i class="fa-solid fa-hourglass-half text-amber-600 animate-spin"></i>
-            <span>Google 免費額度冷卻中</span>
+            <i class="fa-solid fa-triangle-exclamation text-amber-600"></i>
+            <span id="rateLimitTitle">Google 頻率冷卻中</span>
           </div>
-          <span class="px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-800 font-mono font-bold text-xs">
-            剩餘 <span id="rateLimitSeconds">55</span> 秒
+          <span id="rateLimitBadge" class="px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-800 font-mono font-bold text-xs">
+            頻率等待
           </span>
         </div>
-        <p class="text-[12px] text-amber-800/90 leading-relaxed">
-          門市短時間內連續測試已達免費每分鐘上限。<strong>請稍候，倒數結束後系統將自動為您完成辨識</strong>，無需重新拍照！
+        <p id="rateLimitDesc" class="text-[12px] text-amber-800/90 leading-relaxed">
+          門市短時間內連拍已達頻率限制。倒數結束後系統將自動為您完成辨識！
         </p>
-        <div class="w-full bg-amber-200 rounded-full h-1.5 overflow-hidden mt-1">
+        <div id="rateLimitBarContainer" class="hidden w-full bg-amber-200 rounded-full h-1.5 overflow-hidden mt-1">
           <div id="rateLimitBar" class="bg-amber-600 h-full w-full transition-all duration-1000"></div>
         </div>
       </div>
@@ -208,7 +208,7 @@
             </label>
             <span class="text-[11px] text-stone-400">選填</span>
           </div>
-          <input type="text" id="inputInvoiceNo" placeholder="例：SA1150911090 或 免用留空"
+          <input type="text" id="inputInvoiceNo" placeholder="例：SA1150911090 或 202610010030"
                  class="w-full px-3.5 py-2.5 text-sm bg-stone-50 border border-stone-300 rounded-xl focus:bg-white focus:border-brand-600 focus:ring-1 focus:ring-brand-600 focus:outline-none">
         </div>
 
@@ -424,7 +424,10 @@
       diagnosticTitle: document.getElementById("diagnosticTitle"),
       diagnosticMsg: document.getElementById("diagnosticMsg"),
       rateLimitCountdownBox: document.getElementById("rateLimitCountdownBox"),
-      rateLimitSeconds: document.getElementById("rateLimitSeconds"),
+      rateLimitTitle: document.getElementById("rateLimitTitle"),
+      rateLimitBadge: document.getElementById("rateLimitBadge"),
+      rateLimitDesc: document.getElementById("rateLimitDesc"),
+      rateLimitBarContainer: document.getElementById("rateLimitBarContainer"),
       rateLimitBar: document.getElementById("rateLimitBar"),
       entryForm: document.getElementById("entryForm"),
       inputTotalAmount: document.getElementById("inputTotalAmount"),
@@ -522,22 +525,36 @@
       });
     }
 
-    // 【智慧 429 額度冷卻倒數與自動續跑】
+    // 【智慧額度倒數機制】
     let countdownInterval = null;
 
-    function triggerRateLimitCooldown(seconds, callback) {
+    function triggerRateLimitCooldown(seconds, isDailyLimit = false, callback) {
       if (countdownInterval) clearInterval(countdownInterval);
       STATE.isCoolingDown = true;
-      let remaining = Math.max(2, Math.ceil(seconds));
-      const totalSeconds = remaining;
 
       DOM.rateLimitCountdownBox.classList.remove("hidden");
-      DOM.rateLimitSeconds.textContent = remaining;
+
+      if (isDailyLimit) {
+        DOM.rateLimitTitle.textContent = "Google 免費每日額度已滿";
+        DOM.rateLimitBadge.textContent = "今日已滿";
+        DOM.rateLimitDesc.innerHTML = "Google 免費專案每日 20 次已達上限。<strong>單據照片已拍好，您可以直接在下方填寫金額送出</strong>，或至設定更換金鑰！";
+        DOM.rateLimitBarContainer.classList.add("hidden");
+        STATE.isCoolingDown = false;
+        return;
+      }
+
+      let remaining = Math.max(3, Math.ceil(seconds));
+      const totalSeconds = remaining;
+
+      DOM.rateLimitTitle.textContent = "Google 頻率冷卻中";
+      DOM.rateLimitBadge.textContent = `剩餘 ${remaining} 秒`;
+      DOM.rateLimitDesc.innerHTML = "短時間內請求頻率偏高。<strong>倒數結束後系統將自動為您完成辨識</strong>！";
+      DOM.rateLimitBarContainer.classList.remove("hidden");
       DOM.rateLimitBar.style.width = "100%";
 
       countdownInterval = setInterval(() => {
         remaining--;
-        DOM.rateLimitSeconds.textContent = remaining;
+        DOM.rateLimitBadge.textContent = `剩餘 ${remaining} 秒`;
         const pct = Math.max(0, Math.round((remaining / totalSeconds) * 100));
         DOM.rateLimitBar.style.width = `${pct}%`;
 
@@ -546,13 +563,13 @@
           countdownInterval = null;
           STATE.isCoolingDown = false;
           DOM.rateLimitCountdownBox.classList.add("hidden");
-          showToast("✨ 頻率已解鎖，立即為您完成辨識！", "success");
+          showToast("✨ 頻率已解鎖，立即為您辨識！", "success");
           if (typeof callback === "function") callback();
         }
       }, 1000);
     }
 
-    // 【核心 AI 辨識引擎：自動避開過載與頻率保護】
+    // 【核心 AI 辨識引擎：18 秒寬裕超時 + 低思考延遲】
     async function performGeminiOcr(rawBase64) {
       if (STATE.isCoolingDown) {
         showToast("冷卻倒數中，請稍候自動辨識...", "warning");
@@ -560,6 +577,7 @@
       }
 
       DOM.diagnosticBanner.classList.add("hidden");
+      DOM.rateLimitCountdownBox.classList.add("hidden");
       DOM.scannerOverlay.classList.remove("hidden");
       DOM.scannerSubText.textContent = "AI 正在極速解析單據與細項...";
 
@@ -590,8 +608,12 @@
         const fastBase64 = await compressImage(rawBase64, 1000, 0.78);
         const cleanBase64 = fastBase64.includes(",") ? fastBase64.split(",")[1] : fastBase64;
 
-        // 優先直攻官方最新 gemini-3.8-flash；遇到限流則智慧排隊
-        const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
+        // 依據 Google 官方現行可用模型列表排序，優先採用支援度最高之現行旗艦
+        const candidateModels = [
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.5-flash"
+        ];
         let parsed = null;
         let lastErrorText = "";
         let rateLimitWaitSeconds = 0;
@@ -599,8 +621,9 @@
         for (const model of candidateModels) {
           DOM.scannerSubText.textContent = `AI 正在極速解析單據 (${model})...`;
 
+          // 放寬至 18 秒，避免網路稍有延遲就被自己掐斷
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 7000);
+          const timeoutId = setTimeout(() => controller.abort(), 18000);
 
           try {
             const payload = {
@@ -613,7 +636,10 @@
               }],
               generationConfig: {
                 maxOutputTokens: 1024,
-                responseMimeType: "application/json"
+                responseMimeType: "application/json",
+                thinkingConfig: {
+                  thinkingLevel: "low"
+                }
               }
             };
 
@@ -635,12 +661,22 @@
               const msg = err?.error?.message || `HTTP ${res.status}`;
               lastErrorText = `[${model}] ${msg}`;
 
-              // 檢查 429 額度超限
+              // 檢查 429 頻率或配額限制
               if (res.status === 429 || msg.includes("Quota exceeded") || msg.includes("rate-limits")) {
+                const isDaily = msg.includes("limit: 20") || msg.includes("free_tier_requests");
                 const matchWait = msg.match(/retry in ([0-9.]+)s/i);
                 rateLimitWaitSeconds = matchWait ? Math.ceil(parseFloat(matchWait[1])) : 20;
-                // 一旦觸發每分鐘限額，立刻中斷並啟動倒數，不再繼續發送請求消耗額度
+
+                triggerRateLimitCooldown(rateLimitWaitSeconds, isDaily, () => {
+                  if (STATE.currentImageData) performGeminiOcr(STATE.currentImageData);
+                });
                 break;
+              }
+
+              // 503 伺服器臨時壅塞
+              if (res.status === 503 || msg.includes("high demand") || msg.includes("overloaded")) {
+                await new Promise(r => setTimeout(r, 1200));
+                continue;
               }
 
               continue;
@@ -661,7 +697,7 @@
           } catch (e) {
             clearTimeout(timeoutId);
             const isTimeout = e.name === "AbortError";
-            lastErrorText = isTimeout ? `[${model}] 連線逾時 (已自動切換備援)` : `[${model}] ${e.message || String(e)}`;
+            lastErrorText = isTimeout ? `[${model}] 連線逾時 (伺服器運算超過 18 秒)` : `[${model}] ${e.message || String(e)}`;
           }
         }
 
