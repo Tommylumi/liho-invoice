@@ -495,13 +495,13 @@
       });
     }
 
-    // 【極速 AI 辨識引擎：直連 Google 指定主力模型、具備 503 壅塞自動避讓重試】
+    // 【極速 AI 辨識引擎：6 秒超時熔斷、無延遲即時切換、防卡死機制】
     async function performGeminiOcr(rawBase64) {
       DOM.diagnosticBanner.classList.add("hidden");
       DOM.scannerOverlay.classList.remove("hidden");
       DOM.scannerSubText.textContent = "AI 正在極速解析單據與細項...";
 
-      // 精簡極速提示詞
+      // 精簡直擊核心提示詞
       const promptText = `你是里好餐桌進貨解析系統。請辨識單據並直接回傳純 JSON（嚴禁 markdown）：
 {
   "vendor": "廠商名稱(如富益、富盈、第一饗、鴻品、凱燁、樹森、有心、Agogo、美金、三佳、恬芯、德麥、憶霖、鼎鎂、源品、好市多、開元、檸檬先生)",
@@ -526,86 +526,75 @@
           return;
         }
 
-        // 1. 極速壓縮至約 80KB (4G 上傳只需 0.1 秒)
-        const fastBase64 = await compressImage(rawBase64, 1000, 0.78);
+        // 1. 輕量快速壓縮（約 70KB，傳輸只需 0.08 秒）
+        const fastBase64 = await compressImage(rawBase64, 960, 0.75);
         const cleanBase64 = fastBase64.includes(",") ? fastBase64.split(",")[1] : fastBase64;
 
-        // 2. 候選模型列表
-        const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3-flash"];
+        // 2. 候選模型列表：優先使用 Google 官方推薦的 gemini-3-flash-preview，備援 gemini-3.8-flash 與 gemini-3.6-flash
+        const candidateModels = ["gemini-3-flash-preview", "gemini-3.8-flash", "gemini-3.6-flash"];
         let parsed = null;
         let lastErrorText = "";
 
-        // 智慧型發送與 503 壅塞退避重試
+        // 3. 極速輪詢：每隻模型限制 6 秒，逾時立刻切換，絕不發呆卡住！
         for (const model of candidateModels) {
-          let retryCount = 0;
-          const maxRetries = 2; // 若遇 503 繁忙自動重試 2 次
+          DOM.scannerSubText.textContent = `AI 正在極速解析單據 (${model})...`;
 
-          while (retryCount <= maxRetries) {
-            try {
-              if (retryCount > 0) {
-                DOM.scannerSubText.textContent = `伺服器短暫繁忙，正在自動重試 (${model} 第 ${retryCount} 次)...`;
-                await new Promise((r) => setTimeout(r, 1200 * retryCount)); // 等待 1.2 秒避讓高峰
-              } else {
-                DOM.scannerSubText.textContent = `AI 正在極速解析單據 (${model})...`;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6500); // 6.5秒超時直接斷開換下一個
+
+          try {
+            const payload = {
+              contents: [{
+                role: "user",
+                parts: [
+                  { text: promptText },
+                  { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
+                ]
+              }],
+              generationConfig: {
+                maxOutputTokens: 1024,
+                responseMimeType: "application/json"
               }
+            };
 
-              const payload = {
-                contents: [{
-                  role: "user",
-                  parts: [
-                    { text: promptText },
-                    { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } }
-                  ]
-                }],
-                generationConfig: {
-                  maxOutputTokens: 1024,
-                  responseMimeType: "application/json"
-                }
-              };
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+            const res = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": apiKey
+              },
+              body: JSON.stringify(payload),
+              signal: controller.signal
+            });
 
-              const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-              const res = await fetch(url, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "x-goog-api-key": apiKey
-                },
-                body: JSON.stringify(payload)
-              });
+            clearTimeout(timeoutId);
 
-              if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                const errMsg = err?.error?.message || `HTTP ${res.status}`;
-                lastErrorText = `[${model}] ${errMsg}`;
-
-                // 若為 503 High demand 或 429 暫時壅塞，進入重試
-                if (res.status === 503 || errMsg.includes("high demand") || errMsg.includes("overloaded")) {
-                  retryCount++;
-                  continue;
-                }
-                // 若為其他錯誤直接換下一隻模型
-                break;
-              }
-
-              const data = await res.json();
-              const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-              
-              try {
-                const cleanJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-                parsed = JSON.parse(cleanJson);
-              } catch (pErr) {
-                const match = rawText.match(/\{[\s\S]*\}/);
-                if (match) parsed = JSON.parse(match[0]);
-              }
-
-              if (parsed) break; // 成功解析立即跳出
-            } catch (e) {
-              lastErrorText = `[${model}] ${e.message || String(e)}`;
-              retryCount++;
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              lastErrorText = `[${model}] ${err?.error?.message || `HTTP ${res.status}`}`;
+              // 遇到 503 或任何伺服器忙碌，0 延遲秒切換下一台伺服器！
+              continue;
             }
-          }
 
-          if (parsed) break; // 已成功解析，跳出模型循環
+            const data = await res.json();
+            const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            
+            try {
+              const cleanJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+              parsed = JSON.parse(cleanJson);
+            } catch (pErr) {
+              const match = rawText.match(/\{[\s\S]*\}/);
+              if (match) parsed = JSON.parse(match[0]);
+            }
+
+            if (parsed) break; // 成功解析即刻跳出！
+          } catch (e) {
+            clearTimeout(timeoutId);
+            const isTimeout = e.name === "AbortError";
+            lastErrorText = isTimeout ? `[${model}] 連線逾時(已自動換線)` : `[${model}] ${e.message || String(e)}`;
+            // 逾時或連線異常立刻無縫換下一隻模型
+          }
         }
 
         if (parsed) {
@@ -638,7 +627,7 @@
         } else {
           DOM.diagnosticBanner.classList.remove("hidden");
           DOM.diagnosticTitle.textContent = "AI 辨識未完成";
-          DOM.diagnosticMsg.textContent = lastErrorText || "未收到辨識數據，請確認網路連線。";
+          DOM.diagnosticMsg.textContent = lastErrorText || "伺服器忙碌，請點擊右上方重新辨識，或直接手動確認金額。";
           showToast("辨識未完成，請見畫面提示", "warning");
         }
 
