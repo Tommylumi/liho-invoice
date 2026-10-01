@@ -460,6 +460,51 @@
       const d = String(now.getDate()).padStart(2, "0");
       return `${y}-${m}-${d}`;
     }
+
+    function updateTopDateHeader() {
+      const now = new Date();
+      const days = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+      const text = `${now.getMonth() + 1}月${now.getDate()}日 (${days[now.getDay()]})`;
+      if (DOM.topDateLabel) {
+        DOM.topDateLabel.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> ${text}`;
+      }
+      const targetMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
+      if (DOM.targetMonthBadge) {
+        DOM.targetMonthBadge.textContent = targetMonth;
+      }
+    }
+
+    function setQuickStaff(name) {
+      if (DOM.inputStaff) DOM.inputStaff.value = name;
+    }
+
+    async function compressImage(base64Src, maxDim = 1200, quality = 0.8) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.onerror = () => resolve(base64Src);
+        img.src = base64Src;
+      });
+    }
+
     // 【極速 AI 辨識引擎：支援 429 額度冷卻倒數、6 秒超時熔斷、無延遲即時切換】
     let countdownTimer = null;
 
